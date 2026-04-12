@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
 use axum::Router;
-use mcp_server_allenheath_dlive::mcp_handler::Calculator;
-use rmcp::{
-    ServiceExt,
-    transport::{
-        StreamableHttpService, stdio, streamable_http_server::session::local::LocalSessionManager,
-    },
+use mcp_server_allenheath_dlive::mcp_handler::DLiveHandler;
+use rmcp::transport::{
+    StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
 
 #[tokio::main]
@@ -15,7 +12,7 @@ async fn main() -> anyhow::Result<()> {
 
     let session_manager = LocalSessionManager::default();
     let mcp_service = StreamableHttpService::new(
-        || Ok(Calculator),
+        move || Ok(DLiveHandler::new()),
         Arc::new(session_manager),
         Default::default(),
     );

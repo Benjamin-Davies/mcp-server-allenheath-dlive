@@ -2,13 +2,13 @@ use anyhow::{Context, Result, bail};
 use std::net::IpAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use wmidi::{Channel, ControlFunction, MidiMessage, Note, U7};
+use wmidi::{Channel, ControlFunction, MidiMessage, U7};
 
 const DLIVE_TCP_PORT: u16 = 51325;
 const DLIVE_DEFAULT_BASE_CHANNEL: u8 = 11; // 0-indexed, = MIDI channel 12
 
-// SysEx manufacturer header: F0 00 00 1A 50 10 01 00
-const SYSEX_HEADER: &[u8] = &[0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
+// SysEx manufacturer header: [F0] 00 00 1A 50 10 01 00
+const SYSEX_HEADER: &[u8] = &[0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
 
 // NRPN CC numbers
 const NRPN_MSB: ControlFunction = ControlFunction::NON_REGISTERED_PARAMETER_NUMBER_MSB; // CC 99
@@ -18,25 +18,22 @@ const DATA_ENTRY: ControlFunction = ControlFunction::DATA_ENTRY_MSB; // CC 6
 // NRPN parameter IDs
 const PARAM_FADER_LEVEL: U7 = U7::from_u8_lossy(0x17);
 
-pub struct DLive {
+#[derive(Debug)]
+pub struct DLiveClient {
     sock: TcpStream,
     base_channel: u8,
-    input_names: Option<Vec<String>>,
-    mix_names: Option<Vec<String>>,
 }
 
-impl DLive {
+impl DLiveClient {
     /// Connects to the DLive mix-rack without TLS.
     pub async fn new(addr: IpAddr) -> Result<Self> {
         let sock = TcpStream::connect((addr, DLIVE_TCP_PORT))
             .await
             .with_context(|| format!("Failed to connect to dLive MixRack at {addr}"))?;
 
-        Ok(DLive {
+        Ok(DLiveClient {
             sock,
             base_channel: DLIVE_DEFAULT_BASE_CHANNEL,
-            input_names: None,
-            mix_names: None,
         })
     }
 
@@ -53,6 +50,7 @@ impl DLive {
         let mut buf = vec![0u8; msg.bytes_size()];
         msg.copy_to_slice(&mut buf)
             .context("Failed to serialise MIDI message")?;
+        dbg!(hex::encode(&buf));
         self.sock
             .write_all(&buf)
             .await
@@ -79,6 +77,7 @@ impl DLive {
                 .await
                 .context("Failed to read SysEx reply from dLive")?;
             buf.push(byte[0]);
+            dbg!(&buf);
             if byte[0] == 0xF7 {
                 break;
             }
@@ -87,12 +86,13 @@ impl DLive {
     }
 
     async fn fetch_channel_name(&mut self, midi_n: u8, ch: u8) -> Result<String> {
+        dbg!(midi_n, ch);
         let on_byte = midi_n & 0x0F;
         self.send_sysex(&[on_byte, 0x01, ch]).await?;
 
         let reply = self.read_sysex_reply().await?;
-        // Reply layout: SYSEX_HEADER + [0N, 0x02, CH, <name bytes...>, 0xF7]
-        let name_start = SYSEX_HEADER.len() + 3;
+        // Reply layout: [0xF0] + SYSEX_HEADER + [0N, 0x02, CH, <name bytes...>, 0xF7]
+        let name_start = SYSEX_HEADER.len() + 4;
         let name_bytes: Vec<u8> = reply[name_start..]
             .iter()
             .take_while(|&&b| b != 0xF7)
@@ -102,37 +102,31 @@ impl DLive {
     }
 
     /// Gets the names of all 128 inputs, fetching from the desk if not cached.
-    pub async fn list_inputs(&mut self) -> Result<&[String]> {
-        if self.input_names.is_none() {
-            let midi_n = self.base_channel;
-            let mut names = Vec::with_capacity(128);
-            for ch in 0x00u8..=0x7F {
-                names.push(
-                    self.fetch_channel_name(midi_n, ch)
-                        .await
-                        .with_context(|| format!("Failed to fetch name for input {}", ch + 1))?,
-                );
-            }
-            self.input_names = Some(names);
+    pub async fn list_inputs(&mut self) -> Result<Vec<String>> {
+        let midi_n = self.base_channel;
+        let mut names = Vec::with_capacity(128);
+        for ch in 0x00u8..=0x7F {
+            names.push(
+                self.fetch_channel_name(midi_n, ch)
+                    .await
+                    .with_context(|| format!("Failed to fetch name for input {}", ch + 1))?,
+            );
         }
-        Ok(self.input_names.as_deref().unwrap())
+        Ok(names)
     }
 
     /// Gets the names of all 62 mono aux mixes, fetching from the desk if not cached.
-    pub async fn list_outputs(&mut self) -> Result<&[String]> {
-        if self.mix_names.is_none() {
-            let midi_n = self.base_channel + 2;
-            let mut names = Vec::with_capacity(62);
-            for ch in 0x00u8..=0x3D {
-                names.push(
-                    self.fetch_channel_name(midi_n, ch)
-                        .await
-                        .with_context(|| format!("Failed to fetch name for aux mix {}", ch + 1))?,
-                );
-            }
-            self.mix_names = Some(names);
+    pub async fn list_outputs(&mut self) -> Result<Vec<String>> {
+        let midi_n = self.base_channel + 2;
+        let mut names = Vec::with_capacity(62);
+        for ch in 0x00u8..=0x3D {
+            names.push(
+                self.fetch_channel_name(midi_n, ch)
+                    .await
+                    .with_context(|| format!("Failed to fetch name for aux mix {}", ch + 1))?,
+            );
         }
-        Ok(self.mix_names.as_deref().unwrap())
+        Ok(names)
     }
 
     /// Gets the current fader level for an input channel in dB.
