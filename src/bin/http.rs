@@ -1,0 +1,28 @@
+use std::sync::Arc;
+
+use axum::Router;
+use mcp_server_allenheath_dlive::mcp_handler::Calculator;
+use rmcp::{
+    ServiceExt,
+    transport::{
+        StreamableHttpService, stdio, streamable_http_server::session::local::LocalSessionManager,
+    },
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().init();
+
+    let session_manager = LocalSessionManager::default();
+    let mcp_service = StreamableHttpService::new(
+        || Ok(Calculator),
+        Arc::new(session_manager),
+        Default::default(),
+    );
+
+    let app = Router::new().nest_service("/mcp", mcp_service);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    log::info!("Listening on {:?}", listener.local_addr().unwrap());
+    axum::serve(listener, app).await?;
+    Ok(())
+}

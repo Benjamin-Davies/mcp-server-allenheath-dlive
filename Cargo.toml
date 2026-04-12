@@ -4,3 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.102"
+axum = "0.8.8"
+log = "0.4.29"
+rmcp = { version = "1.4.0", features = ["transport-io", "transport-streamable-http-server"] }
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.51.1", features = ["macros", "net", "rt-multi-thread"] }
+tracing-subscriber = "0.3.23"
+wmidi = "4.0.10"
