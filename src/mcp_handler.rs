@@ -1,5 +1,16 @@
+use ::rmcp::ServerHandler;
 use anyhow::Result;
-use rmcp::{handler::server::wrapper::Parameters, schemars, tool, tool_router};
+use rmcp::{
+    ErrorData, RoleServer,
+    handler::server::{tool::ToolCallContext, wrapper::Parameters},
+    model::{
+        CallToolRequestParams, CallToolResult, Implementation, ListToolsResult,
+        PaginatedRequestParams, ServerCapabilities, ServerInfo, Tool,
+    },
+    schemars,
+    service::RequestContext,
+    tool, tool_router,
+};
 use tokio::sync::Mutex;
 
 use crate::dlive::DLiveClient;
@@ -41,7 +52,7 @@ impl State {
     }
 }
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl DLiveHandler {
     #[tool(description = "Calculate the sum of two numbers")]
     fn sum(&self, Parameters(SumRequest { a, b }): Parameters<SumRequest>) -> String {
@@ -56,5 +67,42 @@ impl DLiveHandler {
             Ok(inputs) => inputs.join(","),
             Err(err) => err.to_string(),
         }
+    }
+}
+
+impl ServerHandler for DLiveHandler {
+    fn get_info(&self) -> ServerInfo {
+        let capabilities = ServerCapabilities::builder().enable_tools().build();
+        let instructions = include_str!("instructions.md");
+        let server_info = Implementation::from_build_env();
+
+        ServerInfo::new(capabilities)
+            .with_instructions(instructions)
+            .with_server_info(server_info)
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult {
+            tools: Self::tool_router().list_all(),
+            meta: None,
+            next_cursor: None,
+        })
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        Self::tool_router().get(name).cloned()
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let tcc = ToolCallContext::new(self, request, context);
+        Self::tool_router().call(tcc).await
     }
 }
