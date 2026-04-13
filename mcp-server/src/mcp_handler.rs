@@ -68,6 +68,8 @@ impl DLiveHandler {
             Err(err) => err.to_string(),
         }
     }
+
+    // TODO: when increasing a level would hit a limit, turn all levels down then the master up or vice versa. Make sure to set a (documented) flag in the response to indicate to the agent that this happened and remove it from the instructions.
 }
 
 impl ServerHandler for DLiveHandler {
