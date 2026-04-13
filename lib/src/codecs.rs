@@ -2,7 +2,10 @@ use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::messages::{Channel, Level, Message};
+use crate::{
+    channels::Channel,
+    messages::{Level, Message},
+};
 
 const SYSEX_HEADER: [u8; 8] = [0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
 const CHANNEL_NAME_LEN: usize = 8;
@@ -167,12 +170,16 @@ mod tests {
     use bytes::BytesMut;
     use tokio_util::codec::{Decoder, Encoder};
 
-    use crate::{Channel, codecs::DLiveCodec, messages::Message};
+    use crate::{
+        channels::{Channel, ChannelType},
+        codecs::DLiveCodec,
+        messages::Message,
+    };
 
     #[test]
     fn test_encode_get_channel_name() {
         let message = Message::GetChannelName {
-            channel: Channel::Input(42),
+            channel: Channel(ChannelType::Input, 42),
         };
 
         let mut dst = BytesMut::new();
@@ -193,7 +200,7 @@ mod tests {
         assert_eq!(
             message,
             Message::GetChannelName {
-                channel: Channel::Input(42),
+                channel: Channel(ChannelType::Input, 42),
             }
         );
     }
@@ -201,7 +208,7 @@ mod tests {
     #[test]
     fn test_encode_get_channel_name_response() {
         let message = Message::ChannelName {
-            channel: Channel::Input(42),
+            channel: Channel(ChannelType::Input, 42),
             name: "Chan01".to_owned(),
         };
 
@@ -226,7 +233,7 @@ mod tests {
         assert_eq!(
             message,
             Message::ChannelName {
-                channel: Channel::Input(42),
+                channel: Channel(ChannelType::Input, 42),
                 name: "Chan01".to_owned()
             }
         );

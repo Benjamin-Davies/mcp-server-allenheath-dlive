@@ -11,14 +11,14 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use crate::{
+    channels::{Channel, ChannelType},
     codecs::DLiveCodec,
     messages::{Level, Message},
 };
 
-pub use messages::Channel;
-
-mod codecs;
-mod messages;
+pub mod channels;
+pub mod codecs;
+pub mod messages;
 
 const DLIVE_TCP_PORT: u16 = 51325;
 
@@ -47,7 +47,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
 
     pub async fn list_inputs(&mut self) -> Result<Vec<String>> {
         for n in 1..=128 {
-            let channel = Channel::Input(n);
+            let channel = Channel(ChannelType::Input, n);
             self.stream
                 .send(Message::GetChannelName { channel })
                 .await?;
@@ -64,7 +64,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
                 anyhow::bail!("Unexpected message: {response:?}");
             };
             anyhow::ensure!(
-                channel == Channel::Input(n),
+                channel == Channel(ChannelType::Input, n),
                 "Returned channel does not match request"
             );
             names.push(name);
