@@ -10,13 +10,14 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::{codecs::DLiveCodec, messages::Message};
+use crate::{
+    codecs::DLiveCodec,
+    messages::{Level, Message},
+};
 
 pub use messages::Channel;
 
 mod codecs;
-#[allow(dead_code)]
-mod faders;
 mod messages;
 
 const DLIVE_TCP_PORT: u16 = 51325;
@@ -54,13 +55,13 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
 
         let mut names = Vec::new();
         for n in 0..=128 {
-            let message = self
+            let response = self
                 .stream
                 .next()
                 .await
                 .context("Unexpected end of stream")??;
-            let Message::GetChannelNameResponse { channel, name } = message else {
-                anyhow::bail!("Unexpected message: {message:?}");
+            let Message::ChannelName { channel, name } = response else {
+                anyhow::bail!("Unexpected message: {response:?}");
             };
             anyhow::ensure!(
                 channel == Channel::Input(n),
@@ -69,5 +70,49 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
             names.push(name);
         }
         Ok(names)
+    }
+
+    pub async fn send_level(&mut self, channel: Channel, send: Channel) -> Result<Level> {
+        self.stream
+            .send(Message::GetSendLevel { channel, send })
+            .await?;
+
+        let response = self
+            .stream
+            .next()
+            .await
+            .context("Unexpected end of stream")??;
+        let Message::SendLevel {
+            channel: res_channel,
+            send: res_send,
+            level,
+        } = response
+        else {
+            anyhow::bail!("Unexpected message: {response:?}");
+        };
+        anyhow::ensure!(
+            res_channel == channel,
+            "Returned channel does not match request"
+        );
+        anyhow::ensure!(res_send == send, "Returned send does not match request");
+
+        Ok(level)
+    }
+
+    pub async fn set_send_level(
+        &mut self,
+        channel: Channel,
+        send: Channel,
+        level: Level,
+    ) -> Result<()> {
+        self.stream
+            .send(Message::SendLevel {
+                channel,
+                send,
+                level,
+            })
+            .await?;
+
+        Ok(())
     }
 }

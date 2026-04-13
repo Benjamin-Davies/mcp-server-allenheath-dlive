@@ -2,9 +2,10 @@ use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::messages::{Channel, Message};
+use crate::messages::{Channel, Level, Message};
 
 const SYSEX_HEADER: [u8; 8] = [0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
+const CHANNEL_NAME_LEN: usize = 8;
 
 #[derive(Debug)]
 pub struct DLiveCodec;
@@ -22,18 +23,54 @@ impl Encoder<Message> for DLiveCodec {
                 dst.put_u8(note);
                 dst.put_u8(0xF7);
             }
-            Message::GetChannelNameResponse { channel, name } => {
+            Message::ChannelName { channel, mut name } => {
                 let (midi_channel, note) = channel.to_midi()?;
+                sanitise_channel_name(&mut name);
                 dst.put_slice(&SYSEX_HEADER);
                 dst.put_u8(midi_channel);
                 dst.put_u8(0x02);
                 dst.put_u8(note);
                 dst.put_slice(name.as_bytes());
-                dst.put_bytes(0x00, usize::saturating_sub(8, name.len()));
+                dst.put_u8(0xF7);
+            }
+            Message::GetSendLevel { channel, send } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let (send_midi_channel, send_note) = send.to_midi()?;
+                dst.put_slice(&SYSEX_HEADER);
+                dst.put_u8(midi_channel);
+                dst.put_u8(0x05);
+                dst.put_u8(0x0F);
+                dst.put_u8(0x0D);
+                dst.put_u8(note);
+                dst.put_u8(send_midi_channel);
+                dst.put_u8(send_note);
+                dst.put_u8(0xF7);
+            }
+            Message::SendLevel {
+                channel,
+                send,
+                level,
+            } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let (send_midi_channel, send_note) = send.to_midi()?;
+                dst.put_slice(&SYSEX_HEADER);
+                dst.put_u8(midi_channel);
+                dst.put_u8(0x0D);
+                dst.put_u8(note);
+                dst.put_u8(send_midi_channel);
+                dst.put_u8(send_note);
+                dst.put_u8(level.0);
                 dst.put_u8(0xF7);
             }
         }
         Ok(())
+    }
+}
+
+fn sanitise_channel_name(name: &mut String) {
+    name.truncate(CHANNEL_NAME_LEN);
+    while name.len() < CHANNEL_NAME_LEN {
+        name.push('\0');
     }
 }
 
@@ -62,12 +99,13 @@ fn decode_sysex_message(mut raw: BytesMut) -> anyhow::Result<Option<Message>> {
     anyhow::ensure!(raw.ends_with(&[0xF7]));
 
     raw.advance(SYSEX_HEADER.len());
+    raw.truncate(raw.len() - 1);
     let midi_channel = raw.get_u8();
     let kind = raw.get_u8();
 
     let message = match kind {
         0x01 => {
-            anyhow::ensure!(raw.len() >= 2);
+            anyhow::ensure!(raw.len() == 2);
             let note = raw.get_u8();
             let channel = Channel::from_midi(midi_channel, note)?;
             Message::GetChannelName { channel }
@@ -77,13 +115,45 @@ fn decode_sysex_message(mut raw: BytesMut) -> anyhow::Result<Option<Message>> {
             let note = raw.get_u8();
             let channel = Channel::from_midi(midi_channel, note)?;
 
-            let name_bytes = raw.split_to(raw.len() - 1);
-            let mut name = String::from_utf8(name_bytes.to_vec())?;
+            let mut name = String::from_utf8(raw.to_vec())?;
             if let Some(len) = name.find('\0') {
                 name.truncate(len);
             }
 
-            Message::GetChannelNameResponse { channel, name }
+            Message::ChannelName { channel, name }
+        }
+        0x05 => {
+            anyhow::ensure!(raw.len() == 5);
+            anyhow::ensure!(raw.get_u8() == 0x0F);
+            anyhow::ensure!(raw.get_u8() == 0x0D);
+
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+
+            let send_midi_channel = raw.get_u8();
+            let send_note = raw.get_u8();
+            let send = Channel::from_midi(send_midi_channel, send_note)?;
+
+            Message::GetSendLevel { channel, send }
+        }
+        0x0D => {
+            anyhow::ensure!(raw.len() == 4);
+
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+
+            let send_midi_channel = raw.get_u8();
+            let send_note = raw.get_u8();
+            let send = Channel::from_midi(send_midi_channel, send_note)?;
+
+            let raw_level = raw.get_u8();
+            let level = Level(raw_level);
+
+            Message::SendLevel {
+                channel,
+                send,
+                level,
+            }
         }
         _ => anyhow::bail!("Unknown SysEx message kind: 0x{kind:02X}"),
     };
@@ -131,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_encode_get_channel_name_response() {
-        let message = Message::GetChannelNameResponse {
+        let message = Message::ChannelName {
             channel: Channel::Input(42),
             name: "Chan01".to_owned(),
         };
@@ -156,7 +226,7 @@ mod tests {
 
         assert_eq!(
             message,
-            Message::GetChannelNameResponse {
+            Message::ChannelName {
                 channel: Channel::Input(42),
                 name: "Chan01".to_owned()
             }
