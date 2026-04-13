@@ -3,6 +3,19 @@
 version = 4
 
 [[package]]
+name = "allenheath-dlive"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "futures",
+ "hex",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -546,16 +559,16 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 name = "mcp-server-allenheath-dlive"
 version = "0.1.0"
 dependencies = [
+ "allenheath-dlive",
  "anyhow",
  "axum",
  "bytes",
  "futures",
- "hex",
- "log",
  "rmcp",
  "serde",
  "tokio",
  "tokio-util",
+ "tracing",
  "tracing-subscriber",
 ]
 

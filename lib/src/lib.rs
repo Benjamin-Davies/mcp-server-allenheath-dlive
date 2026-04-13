@@ -10,7 +10,7 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::dlive::{codecs::DLiveCodec, messages::Message};
+use crate::{codecs::DLiveCodec, messages::Message};
 
 pub use messages::Channel;
 

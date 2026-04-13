@@ -1,4 +1,4 @@
-use mcp_server_allenheath_dlive::dlive::DLiveClient;
+use allenheath_dlive::DLiveClient;
 
 #[tokio::main]
 async fn main() {

@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new().nest_service("/mcp", mcp_service);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    log::info!("Listening on {:?}", listener.local_addr().unwrap());
+    tracing::info!("Listening on {:?}", listener.local_addr().unwrap());
     axum::serve(listener, app).await?;
     Ok(())
 }

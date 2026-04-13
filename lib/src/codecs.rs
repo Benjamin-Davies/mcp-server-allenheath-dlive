@@ -2,7 +2,7 @@ use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 
-use crate::dlive::messages::{Channel, Message};
+use crate::messages::{Channel, Message};
 
 const SYSEX_HEADER: [u8; 8] = [0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
 
@@ -98,7 +98,7 @@ mod tests {
     use bytes::BytesMut;
     use tokio_util::codec::{Decoder, Encoder};
 
-    use crate::dlive::{Channel, codecs::DLiveCodec, messages::Message};
+    use crate::{Channel, codecs::DLiveCodec, messages::Message};
 
     #[test]
     fn test_encode_get_channel_name() {

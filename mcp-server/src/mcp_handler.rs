@@ -13,7 +13,7 @@ use rmcp::{
 };
 use tokio::sync::Mutex;
 
-use crate::dlive::DLiveClient;
+use allenheath_dlive::DLiveClient;
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SumRequest {

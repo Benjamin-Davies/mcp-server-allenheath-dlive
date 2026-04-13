@@ -91,7 +91,7 @@ channel_mappings! {
 
 #[cfg(test)]
 mod tests {
-    use crate::dlive::messages::Channel;
+    use crate::messages::Channel;
 
     #[test]
     fn test_channel_is_valid() {
