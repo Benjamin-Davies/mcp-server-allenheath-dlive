@@ -1,18 +1,26 @@
 use std::sync::Arc;
 
 use axum::Router;
-use mcp_server_allenheath_dlive::mcp_handler::DLiveHandler;
+use clap::Parser;
 use rmcp::transport::{
     StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
 
+use crate::{args::Args, handler::DLiveHandler};
+
+mod args;
+mod handler;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv()?;
     tracing_subscriber::fmt().init();
+
+    let args = Args::parse();
 
     let session_manager = LocalSessionManager::default();
     let mcp_service = StreamableHttpService::new(
-        move || Ok(DLiveHandler::new()),
+        move || Ok(DLiveHandler::new(args.clone())),
         Arc::new(session_manager),
         Default::default(),
     );

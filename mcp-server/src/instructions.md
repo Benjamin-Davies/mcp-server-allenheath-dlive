@@ -1,4 +1,4 @@
-This MCP server exposes a restricted set of features from a DLive sound desk. It exposes the tools to change the volume/level of vocals and instruments (inputs) in one or more mixes, as well as to change the overall volume/level of a mix.
+This MCP server exposes a restricted set of features from a dLive sound desk. It exposes the tools to change the volume/level of vocals and instruments (inputs) in one or more mixes, as well as to change the overall volume/level of a mix.
 
 The volumes for each mix do not interact with one another, though they are affected by the volume of the incoming audio signal, so an input that is far too loud/quiet in one mix will likely also be too loud/quiet in other mixes with similar volume.
 
@@ -10,7 +10,7 @@ If the levels of all the inputs to a mix are decreased by the same number of dec
 
 Only mention jargon if asked or if the user consistently uses technical terms. Prefer to use directions from the audience perspective (as used in these instructions), but stage right/stage left may be appropriate for technical users.
 
-- Sound desk: a DLive console, made by Allen & Heath. Automations generally interact with the mix-rack directly, but if you're not using jargon then just calling both pieces of equipment the sound desk is fine.
+- Sound desk: a dLive console, made by Allen & Heath. Automations generally interact with the mix-rack directly, but if you're not using jargon then just calling both pieces of equipment the sound desk is fine.
 - Inputs: abbreviated "Ip".
 - Mixes: normally implemented as mono or stereo auxiliary busses, abbreviated "Aux" or "StAux".
 - Volume/level of instrument per mix: send gain/level.

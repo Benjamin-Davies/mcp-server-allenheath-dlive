@@ -15,6 +15,8 @@ use tokio::sync::Mutex;
 
 use allenheath_dlive::DLiveClient;
 
+use crate::args::Args;
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct SumRequest {
     #[schemars(description = "the left hand side number")]
@@ -33,7 +35,8 @@ struct State {
 }
 
 impl DLiveHandler {
-    pub fn new() -> Self {
+    pub fn new(args: Args) -> Self {
+        dbg!(args);
         Self {
             state: Mutex::new(State { client: None }),
         }
