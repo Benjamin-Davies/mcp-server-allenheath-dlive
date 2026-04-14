@@ -11,7 +11,7 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use crate::{
-    channels::{Channel, ChannelType},
+    channels::Channel,
     codecs::DLiveCodec,
     messages::{Level, Message},
 };
@@ -45,26 +45,29 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         }
     }
 
-    pub async fn list_inputs(&mut self) -> Result<Vec<String>> {
-        for n in 1..=128 {
-            let channel = Channel(ChannelType::Input, n);
+    pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<String>> {
+        for &channel in channels {
             self.stream
                 .send(Message::GetChannelName { channel })
                 .await?;
         }
 
         let mut names = Vec::new();
-        for n in 0..=128 {
+        for &channel in channels {
             let response = self
                 .stream
                 .next()
                 .await
                 .context("Unexpected end of stream")??;
-            let Message::ChannelName { channel, name } = response else {
+            let Message::ChannelName {
+                channel: res_channel,
+                name,
+            } = response
+            else {
                 anyhow::bail!("Unexpected message: {response:?}");
             };
             anyhow::ensure!(
-                channel == Channel(ChannelType::Input, n),
+                res_channel == channel,
                 "Returned channel does not match request"
             );
             names.push(name);

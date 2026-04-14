@@ -17,6 +17,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
 
     let args = Args::parse();
+    let args = Arc::new(args);
 
     let session_manager = LocalSessionManager::default();
     let mcp_service = StreamableHttpService::new(

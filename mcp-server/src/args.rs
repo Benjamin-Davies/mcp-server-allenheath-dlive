@@ -1,6 +1,6 @@
 use std::{fmt, net::IpAddr, str::FromStr};
 
-use allenheath_dlive::channels::ChannelType;
+use allenheath_dlive::channels::{Channel, ChannelType};
 use anyhow::Context;
 use clap::Parser;
 
@@ -31,6 +31,22 @@ pub struct ChannelRangeList {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelRange(ChannelType, u8, u8);
+
+impl ChannelRangeList {
+    pub fn iter(&self) -> impl Iterator<Item = Channel> {
+        self.ranges.iter().flat_map(ChannelRange::iter)
+    }
+}
+
+impl ChannelRange {
+    pub fn iter(&self) -> impl Iterator<Item = Channel> {
+        let step = match self.0 {
+            ChannelType::StereoInput => 2,
+            _ => 1,
+        };
+        (self.1..=self.2).step_by(step).map(|n| Channel(self.0, n))
+    }
+}
 
 impl fmt::Debug for ChannelRangeList {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -89,6 +105,9 @@ impl FromStr for ChannelRange {
             let n = rest.parse::<u8>()?;
             (n, n)
         };
+
+        Channel(ty, start).validate()?;
+        Channel(ty, end).validate()?;
 
         Ok(ChannelRange(ty, start, end))
     }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ::rmcp::ServerHandler;
 use anyhow::Result;
 use rmcp::{
@@ -26,6 +28,7 @@ pub struct SumRequest {
 
 #[derive(Debug)]
 pub struct DLiveHandler {
+    args: Arc<Args>,
     state: Mutex<State>,
 }
 
@@ -35,9 +38,9 @@ struct State {
 }
 
 impl DLiveHandler {
-    pub fn new(args: Args) -> Self {
-        dbg!(args);
+    pub fn new(args: Arc<Args>) -> Self {
         Self {
+            args,
             state: Mutex::new(State { client: None }),
         }
     }
@@ -66,7 +69,21 @@ impl DLiveHandler {
     async fn list_inputs(&self) -> String {
         let mut state = self.state.lock().await;
         let client = state.client().await;
-        match client.list_inputs().await {
+        let inputs = self.args.inputs.iter().collect::<Vec<_>>();
+        // TODO: cache names so that they can be used for all commands
+        match client.channel_names(&inputs).await {
+            Ok(inputs) => inputs.join(","),
+            Err(err) => err.to_string(),
+        }
+    }
+
+    #[tool(description = "Get the names of the mixes")]
+    async fn list_mixes(&self) -> String {
+        let mut state = self.state.lock().await;
+        let client = state.client().await;
+        let inputs = self.args.mixes.iter().collect::<Vec<_>>();
+        // TODO: cache names so that they can be used for all commands
+        match client.channel_names(&inputs).await {
             Ok(inputs) => inputs.join(","),
             Err(err) => err.to_string(),
         }
