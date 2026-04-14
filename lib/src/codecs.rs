@@ -105,17 +105,17 @@ fn decode_sysex_message(mut raw: BytesMut) -> anyhow::Result<Option<Message>> {
 
     let message = match kind {
         0x01 => {
-            anyhow::ensure!(raw.len() == 2);
+            anyhow::ensure!(raw.len() == 1);
             let note = raw.get_u8();
             let channel = Channel::from_midi(midi_channel, note)?;
             Message::GetChannelName { channel }
         }
         0x02 => {
-            anyhow::ensure!(raw.len() >= 2);
+            anyhow::ensure!(raw.len() >= 1);
             let note = raw.get_u8();
             let channel = Channel::from_midi(midi_channel, note)?;
 
-            let mut name = String::from_utf8(raw.to_vec())?;
+            let mut name = String::from_utf8(raw.split().to_vec())?;
             if let Some(len) = name.find('\0') {
                 name.truncate(len);
             }
@@ -158,7 +158,6 @@ fn decode_sysex_message(mut raw: BytesMut) -> anyhow::Result<Option<Message>> {
         _ => anyhow::bail!("Unknown SysEx message kind: 0x{kind:02X}"),
     };
 
-    anyhow::ensure!(raw.get_u8() == 0xF7);
     anyhow::ensure!(raw.is_empty());
     Ok(Some(message))
 }
