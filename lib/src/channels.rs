@@ -153,7 +153,11 @@ impl FromStr for Channel {
         let (ty_str, rest) = s.split_at(prefix_len);
         let ty = ty_str.parse()?;
         let n = rest.parse()?;
-        Ok(Channel(ty, n))
+        let channel = Channel(ty, n);
+
+        channel.validate()?;
+
+        Ok(channel)
     }
 }
 

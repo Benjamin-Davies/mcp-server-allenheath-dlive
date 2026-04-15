@@ -115,7 +115,7 @@ impl FromStr for ChannelRange {
 
 #[cfg(test)]
 mod tests {
-    use allenheath_dlive::channels::ChannelType;
+    use allenheath_dlive::channels::{Channel, ChannelType};
 
     use crate::args::{ChannelRange, ChannelRangeList};
 
@@ -129,7 +129,7 @@ mod tests {
                 ChannelRange(ChannelType::Input, 123, 123),
             ],
         };
-        let s = "Dca16-20,Ip49-68,StIp69-85,Ip123";
+        let s = "DCA16-20,Ip49-68,StIp69-85,Ip123";
 
         assert_eq!(ranges.to_string(), s);
     }
@@ -144,8 +144,66 @@ mod tests {
                 ChannelRange(ChannelType::Input, 123, 123),
             ],
         };
-        let s = "Dca16-20,Ip49-68,StIp69-85,Ip123";
+        let s = "DCA16-20,Ip49-68,StIp69-85,Ip123";
 
         assert_eq!(s.parse::<ChannelRangeList>().unwrap(), ranges);
+    }
+
+    #[test]
+    fn test_iter_input_range() {
+        let range = ChannelRange(ChannelType::Input, 3, 7);
+        assert_eq!(
+            range.iter().collect::<Vec<_>>(),
+            vec![
+                Channel(ChannelType::Input, 3),
+                Channel(ChannelType::Input, 4),
+                Channel(ChannelType::Input, 5),
+                Channel(ChannelType::Input, 6),
+                Channel(ChannelType::Input, 7),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_iter_stereo_input_range() {
+        let range = ChannelRange(ChannelType::StereoInput, 3, 7);
+        assert_eq!(
+            range.iter().collect::<Vec<_>>(),
+            vec![
+                Channel(ChannelType::StereoInput, 3),
+                Channel(ChannelType::StereoInput, 5),
+                Channel(ChannelType::StereoInput, 7),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_iter_aux_range() {
+        let range = ChannelRange(ChannelType::MonoAux, 3, 7);
+        assert_eq!(
+            range.iter().collect::<Vec<_>>(),
+            vec![
+                Channel(ChannelType::MonoAux, 3),
+                Channel(ChannelType::MonoAux, 4),
+                Channel(ChannelType::MonoAux, 5),
+                Channel(ChannelType::MonoAux, 6),
+                Channel(ChannelType::MonoAux, 7),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_iter_stereo_aux_range() {
+        let range = ChannelRange(ChannelType::StereoAux, 3, 7);
+        assert_eq!(
+            range.iter().collect::<Vec<_>>(),
+            vec![
+                Channel(ChannelType::StereoAux, 3),
+                Channel(ChannelType::StereoAux, 4),
+                Channel(ChannelType::StereoAux, 5),
+                Channel(ChannelType::StereoAux, 6),
+                Channel(ChannelType::StereoAux, 7),
+            ]
+        );
     }
 }
