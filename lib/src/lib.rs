@@ -41,7 +41,7 @@ impl DLiveClient<TcpStream> {
 impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
     pub fn with_stream(stream: S) -> Self {
         Self {
-            stream: Box::pin(Framed::new(stream, DLiveCodec)),
+            stream: Box::pin(Framed::new(stream, DLiveCodec::default())),
         }
     }
 

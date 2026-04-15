@@ -1,5 +1,9 @@
 use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
+use midi_stream::{
+    MidiCodec, RunningStatus,
+    wmidi::{MidiMessage, U7},
+};
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::{
@@ -7,66 +11,92 @@ use crate::{
     messages::{Level, Message},
 };
 
-const SYSEX_HEADER: [u8; 8] = [0xF0, 0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
+const SYSEX_HEADER: [u8; 7] = [0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
 const CHANNEL_NAME_LEN: usize = 8;
 
-#[derive(Debug)]
-pub struct DLiveCodec;
+#[derive(Debug, Default)]
+pub struct DLiveCodec {
+    inner: MidiCodec<RunningStatus>,
+}
+
+impl DLiveCodec {
+    fn encode_sysex(
+        &mut self,
+        f: impl FnOnce(&mut BytesMut) -> anyhow::Result<()>,
+        dst: &mut BytesMut,
+    ) -> anyhow::Result<()> {
+        let mut buf = BytesMut::new();
+        buf.put_slice(&SYSEX_HEADER);
+        f(&mut buf)?;
+
+        self.inner
+            .encode(MidiMessage::SysEx(U7::try_from_bytes(&buf)?), dst)?;
+
+        Ok(())
+    }
+}
 
 impl Encoder<Message> for DLiveCodec {
     type Error = anyhow::Error;
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> anyhow::Result<()> {
         match item {
-            Message::GetChannelName { channel } => {
-                let (midi_channel, note) = channel.to_midi()?;
-                dst.put_slice(&SYSEX_HEADER);
-                dst.put_u8(midi_channel);
-                dst.put_u8(0x01);
-                dst.put_u8(note);
-                dst.put_u8(0xF7);
-            }
-            Message::ChannelName { channel, mut name } => {
-                let (midi_channel, note) = channel.to_midi()?;
-                sanitise_channel_name(&mut name);
-                dst.put_slice(&SYSEX_HEADER);
-                dst.put_u8(midi_channel);
-                dst.put_u8(0x02);
-                dst.put_u8(note);
-                dst.put_slice(name.as_bytes());
-                dst.put_u8(0xF7);
-            }
-            Message::GetSendLevel { channel, send } => {
-                let (midi_channel, note) = channel.to_midi()?;
-                let (send_midi_channel, send_note) = send.to_midi()?;
-                dst.put_slice(&SYSEX_HEADER);
-                dst.put_u8(midi_channel);
-                dst.put_u8(0x05);
-                dst.put_u8(0x0F);
-                dst.put_u8(0x0D);
-                dst.put_u8(note);
-                dst.put_u8(send_midi_channel);
-                dst.put_u8(send_note);
-                dst.put_u8(0xF7);
-            }
+            Message::GetChannelName { channel } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x01, note]);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::ChannelName { channel, mut name } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    sanitise_channel_name(&mut name);
+                    buf.put_slice(&[midi_channel, 0x02, note]);
+                    buf.put_slice(name.as_bytes());
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::GetSendLevel { channel, send } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    let (send_midi_channel, send_note) = send.to_midi()?;
+                    buf.put_slice(&[
+                        midi_channel,
+                        0x05,
+                        0x0F,
+                        0x0D,
+                        note,
+                        send_midi_channel,
+                        send_note,
+                    ]);
+                    Ok(())
+                },
+                dst,
+            ),
             Message::SendLevel {
                 channel,
                 send,
                 level,
-            } => {
-                let (midi_channel, note) = channel.to_midi()?;
-                let (send_midi_channel, send_note) = send.to_midi()?;
-                dst.put_slice(&SYSEX_HEADER);
-                dst.put_u8(midi_channel);
-                dst.put_u8(0x0D);
-                dst.put_u8(note);
-                dst.put_u8(send_midi_channel);
-                dst.put_u8(send_note);
-                dst.put_u8(level.0);
-                dst.put_u8(0xF7);
-            }
+            } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    let (send_midi_channel, send_note) = send.to_midi()?;
+                    buf.put_slice(&[
+                        midi_channel,
+                        0x0D,
+                        note,
+                        send_midi_channel,
+                        send_note,
+                        level.0,
+                    ]);
+                    Ok(())
+                },
+                dst,
+            ),
         }
-        Ok(())
     }
 }
 
@@ -82,27 +112,24 @@ impl Decoder for DLiveCodec {
     type Error = anyhow::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> anyhow::Result<Option<Message>> {
-        match src.first() {
-            Some(0xF0) => {
-                let Some(body_len) = src.iter().skip(1).position(|&b| b & 0x80 != 0) else {
-                    return Ok(None);
-                };
-                let raw = src.split_to(body_len + 2);
-                decode_sysex_message(raw).context("Invalid SysEx message")
+        while let Some(midi_msg) = self.inner.decode(src)? {
+            match &midi_msg {
+                MidiMessage::OwnedSysEx(data) => {
+                    let bytes = U7::data_to_bytes(data);
+                    let msg = decode_sysex_message(bytes).context("Invalid SysEx message")?;
+                    return Ok(msg);
+                }
+                _ => anyhow::bail!("Unknown MIDI message {midi_msg:?}"),
             }
-            Some(status) => anyhow::bail!("Unknown MIDI status: 0x{status:02X}"),
-            None => Ok(None),
         }
+        Ok(None)
     }
 }
 
-fn decode_sysex_message(mut raw: BytesMut) -> anyhow::Result<Option<Message>> {
-    anyhow::ensure!(raw.len() >= SYSEX_HEADER.len() + 3);
-    anyhow::ensure!(raw.starts_with(&SYSEX_HEADER));
-    anyhow::ensure!(raw.ends_with(&[0xF7]));
-
-    raw.advance(SYSEX_HEADER.len());
-    raw.truncate(raw.len() - 1);
+fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
+    let mut raw = raw
+        .strip_prefix(&SYSEX_HEADER)
+        .context("Unknown SysEx message")?;
     let midi_channel = raw.get_u8();
     let kind = raw.get_u8();
 
@@ -118,10 +145,11 @@ fn decode_sysex_message(mut raw: BytesMut) -> anyhow::Result<Option<Message>> {
             let note = raw.get_u8();
             let channel = Channel::from_midi(midi_channel, note)?;
 
-            let mut name = String::from_utf8(raw.split().to_vec())?;
+            let mut name = String::from_utf8(raw.to_vec())?;
             if let Some(len) = name.find('\0') {
                 name.truncate(len);
             }
+            raw = &[];
 
             Message::ChannelName { channel, name }
         }
@@ -183,7 +211,7 @@ mod tests {
         };
 
         let mut dst = BytesMut::new();
-        DLiveCodec.encode(message, &mut dst).unwrap();
+        DLiveCodec::default().encode(message, &mut dst).unwrap();
 
         assert_eq!(hex::encode(dst.to_vec()), "f000001a501001000b0129f7");
     }
@@ -192,7 +220,7 @@ mod tests {
     fn test_decode_get_channel_name() {
         let src = hex::decode("f000001a501001000b0129f7").unwrap();
 
-        let message = DLiveCodec
+        let message = DLiveCodec::default()
             .decode(&mut src.as_slice().into())
             .unwrap()
             .unwrap();
@@ -213,7 +241,7 @@ mod tests {
         };
 
         let mut dst = BytesMut::new();
-        DLiveCodec.encode(message, &mut dst).unwrap();
+        DLiveCodec::default().encode(message, &mut dst).unwrap();
 
         assert_eq!(
             hex::encode(dst.to_vec()),
@@ -225,7 +253,7 @@ mod tests {
     fn test_decode_get_channel_name_response() {
         let src = hex::decode("f000001a501001000b02294368616e30310000f7").unwrap();
 
-        let message = DLiveCodec
+        let message = DLiveCodec::default()
             .decode(&mut src.as_slice().into())
             .unwrap()
             .unwrap();
