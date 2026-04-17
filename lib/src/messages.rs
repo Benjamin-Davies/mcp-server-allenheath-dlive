@@ -23,6 +23,13 @@ pub enum Message {
         send: Channel,
         level: Level,
     },
+    GetFaderLevel {
+        channel: Channel,
+    },
+    FaderLevel {
+        channel: Channel,
+        level: Level,
+    },
 }
 
 impl Level {

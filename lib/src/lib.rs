@@ -118,4 +118,35 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
 
         Ok(())
     }
+
+    pub async fn fader_level(&mut self, channel: Channel) -> Result<Level> {
+        self.stream.send(Message::GetFaderLevel { channel }).await?;
+
+        let response = self
+            .stream
+            .next()
+            .await
+            .context("Unexpected end of stream")??;
+        let Message::FaderLevel {
+            channel: res_channel,
+            level,
+        } = response
+        else {
+            anyhow::bail!("Unexpected message: {response:?}");
+        };
+        anyhow::ensure!(
+            res_channel == channel,
+            "Returned channel does not match request"
+        );
+
+        Ok(level)
+    }
+
+    pub async fn set_fader_level(&mut self, channel: Channel, level: Level) -> Result<()> {
+        self.stream
+            .send(Message::FaderLevel { channel, level })
+            .await?;
+
+        Ok(())
+    }
 }

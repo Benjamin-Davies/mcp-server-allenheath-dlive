@@ -54,11 +54,12 @@ const MIDI_MAPPINGS: &[(ChannelType, u8, RangeInclusive<u8>)] = &[
     ),
 ];
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Channel(pub ChannelType, pub u8);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChannelType {
+    #[default]
     Input,
     MonoGroup,
     StereoGroup,

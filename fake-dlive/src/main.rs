@@ -7,13 +7,16 @@ use allenheath_dlive::{
     messages::{Level, Message},
 };
 use futures::{SinkExt, TryStreamExt};
-use tokio::{net::TcpListener, sync::Mutex};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
+};
 use tokio_util::codec::Framed;
 
 #[derive(Debug, Default)]
 struct State {
     send_levels: BTreeMap<(Channel, Channel), Level>,
-    // TODO: mix_levels: BTreeMap<Channel, Level>,
+    fader_levels: BTreeMap<Channel, Level>,
 }
 
 #[tokio::main]
@@ -30,45 +33,70 @@ async fn main() -> anyhow::Result<()> {
 
         let state = state.clone();
         tokio::spawn(async move {
-            let mut stream = Framed::new(stream, DLiveCodec::default());
+            match handle_connection(stream, state).await {
+                Ok(()) => {
+                    // Success, do nothing
+                }
+                Err(err) => {
+                    tracing::error!("{err:?}");
+                }
+            }
+        });
+    }
+}
 
-            while let Some(message) = stream.try_next().await? {
-                match message {
-                    Message::GetChannelName { channel } => {
-                        let name = format!("@{channel}").parse().unwrap();
-                        stream.send(Message::ChannelName { channel, name }).await?;
-                    }
-                    Message::ChannelName { .. } => {
-                        // Ignore channel name changes. The MCP server will never send these.
-                    }
-                    Message::GetSendLevel { channel, send } => {
-                        let state = state.lock().await;
-                        let level = state
-                            .send_levels
-                            .get(&(channel, send))
-                            .copied()
-                            .unwrap_or(Level::ZERO);
-                        stream
-                            .send(Message::SendLevel {
-                                channel,
-                                send,
-                                level,
-                            })
-                            .await?;
-                    }
-                    Message::SendLevel {
+async fn handle_connection(stream: TcpStream, state: Arc<Mutex<State>>) -> anyhow::Result<()> {
+    let mut stream = Framed::new(stream, DLiveCodec::default());
+
+    while let Some(message) = stream.try_next().await? {
+        match message {
+            Message::GetChannelName { channel } => {
+                let name = format!("@{channel}").parse().unwrap();
+                stream.send(Message::ChannelName { channel, name }).await?;
+            }
+            Message::ChannelName { .. } => {
+                // Ignore channel name changes. The MCP server will never send these.
+            }
+            Message::GetSendLevel { channel, send } => {
+                let state = state.lock().await;
+                let level = state
+                    .send_levels
+                    .get(&(channel, send))
+                    .copied()
+                    .unwrap_or(Level::ZERO);
+                stream
+                    .send(Message::SendLevel {
                         channel,
                         send,
                         level,
-                    } => {
-                        tracing::info!("Setting send level {channel} -> {send} to {level}");
-                        let mut state = state.lock().await;
-                        state.send_levels.insert((channel, send), level);
-                    }
-                }
+                    })
+                    .await?;
             }
-
-            Ok::<(), anyhow::Error>(())
-        });
+            Message::SendLevel {
+                channel,
+                send,
+                level,
+            } => {
+                tracing::info!("Setting send level {channel} -> {send} to {level}");
+                let mut state = state.lock().await;
+                state.send_levels.insert((channel, send), level);
+            }
+            Message::GetFaderLevel { channel } => {
+                let state = state.lock().await;
+                let level = state
+                    .fader_levels
+                    .get(&channel)
+                    .copied()
+                    .unwrap_or(Level::ZERO);
+                stream.send(Message::FaderLevel { channel, level }).await?;
+            }
+            Message::FaderLevel { channel, level } => {
+                tracing::info!("Setting fader level {channel} to {level}");
+                let mut state = state.lock().await;
+                state.fader_levels.insert(channel, level);
+            }
+        }
     }
+
+    Ok(())
 }

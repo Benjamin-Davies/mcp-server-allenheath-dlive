@@ -24,7 +24,7 @@ struct ListChannelsResponse {
 
 #[derive(Debug, Clone, Copy, serde::Serialize, schemars::JsonSchema)]
 struct ChannelDetails {
-    id: Channel,
+    internal: Channel,
     name: ChannelName,
 }
 
@@ -44,6 +44,23 @@ struct SetInputLevelRequest {
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 struct InputLevelResponse {
     input: ChannelName,
+    mix: ChannelName,
+    level: Level,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct GetMixLevelRequest {
+    mix: ChannelName,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct SetMixLevelRequest {
+    mix: ChannelName,
+    level: Level,
+}
+
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+struct MixLevelResponse {
     mix: ChannelName,
     level: Level,
 }
@@ -94,7 +111,7 @@ impl State {
             self.inputs = inputs
                 .into_iter()
                 .zip(names)
-                .map(|(id, name)| ChannelDetails { id, name })
+                .map(|(id, name)| ChannelDetails { internal: id, name })
                 .collect();
         }
         Ok(&self.inputs)
@@ -110,7 +127,7 @@ impl State {
             self.mixes = mixes
                 .into_iter()
                 .zip(names)
-                .map(|(id, name)| ChannelDetails { id, name })
+                .map(|(id, name)| ChannelDetails { internal: id, name })
                 .collect();
         }
         Ok(&self.mixes)
@@ -118,22 +135,20 @@ impl State {
 
     async fn input_id(&mut self, name: ChannelName) -> anyhow::Result<Channel> {
         let inputs = self.list_inputs().await?;
-        dbg!(&inputs, name);
         let details = inputs
             .iter()
             .find(|d| d.name == name)
             .context("could not find an input with that exact name")?;
-        Ok(details.id)
+        Ok(details.internal)
     }
 
     async fn mix_id(&mut self, name: ChannelName) -> anyhow::Result<Channel> {
         let mixes = self.list_mixes().await?;
-        dbg!(&mixes, name);
         let details = mixes
             .iter()
             .find(|d| d.name == name)
             .context("could not find a mix with that exact name")?;
-        Ok(details.id)
+        Ok(details.internal)
     }
 }
 
@@ -161,7 +176,7 @@ impl DLiveHandler {
         Ok(Json(response))
     }
 
-    #[tool(description = "Gets the level of an input.")]
+    #[tool(description = "Gets the level of an input in a mix.")]
     async fn get_input_level(
         &self,
         Parameters(GetInputLevelRequest { input, mix }): Parameters<GetInputLevelRequest>,
@@ -180,7 +195,7 @@ impl DLiveHandler {
         Ok(Json(response))
     }
 
-    #[tool(description = "Sets the level of an input.")]
+    #[tool(description = "Sets the level of an input in a mix.")]
     async fn set_input_level(
         &self,
         Parameters(SetInputLevelRequest { input, mix, level }): Parameters<SetInputLevelRequest>,
@@ -199,7 +214,38 @@ impl DLiveHandler {
         Ok(Json(response))
     }
 
-    // TODO: when increasing a level would hit a limit, turn all levels down then the master up or vice versa. Make sure to set a (documented) flag in the response to indicate to the agent that this happened and remove it from the instructions.
+    #[tool(description = "Gets the level of a mix.")]
+    async fn get_mix_level(
+        &self,
+        Parameters(GetMixLevelRequest { mix }): Parameters<GetMixLevelRequest>,
+    ) -> Result<Json<MixLevelResponse>, ErrorData> {
+        let mut state = self.state.lock().await;
+        let mix_id = state.mix_id(mix).await.map_err(internal_error)?;
+
+        let client = state.client().await.map_err(internal_error)?;
+        let level = client.fader_level(mix_id).await.map_err(internal_error)?;
+
+        let response = MixLevelResponse { mix, level };
+        Ok(Json(response))
+    }
+
+    #[tool(description = "Sets the level of a mix.")]
+    async fn set_mix_level(
+        &self,
+        Parameters(SetMixLevelRequest { mix, level }): Parameters<SetMixLevelRequest>,
+    ) -> Result<Json<MixLevelResponse>, ErrorData> {
+        let mut state = self.state.lock().await;
+        let mix_id = state.mix_id(mix).await.map_err(internal_error)?;
+
+        let client = state.client().await.map_err(internal_error)?;
+        client
+            .set_fader_level(mix_id, level)
+            .await
+            .map_err(internal_error)?;
+
+        let response = MixLevelResponse { mix, level };
+        Ok(Json(response))
+    }
 }
 
 #[tool_handler]
