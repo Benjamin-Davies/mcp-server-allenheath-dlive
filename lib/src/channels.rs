@@ -54,7 +54,7 @@ const MIDI_MAPPINGS: &[(ChannelType, u8, RangeInclusive<u8>)] = &[
     ),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Channel(pub ChannelType, pub u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -76,7 +76,7 @@ pub enum ChannelType {
     StereoUFXReturn,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChannelName(pub [u8; CHANNEL_NAME_LEN]);
 
 impl Channel {
@@ -115,6 +115,20 @@ impl Channel {
             .find(|&(_, n, ch_range)| n == &midi_channel && ch_range.contains(&note))
             .context("unknown channel type")?;
         Ok(Self(*ty, note - ch_range.start() + 1))
+    }
+}
+
+impl fmt::Debug for Channel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Channel").field(&self.to_string()).finish()
+    }
+}
+
+impl fmt::Debug for ChannelName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("ChannelName")
+            .field(&self.to_string())
+            .finish()
     }
 }
 

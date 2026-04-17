@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt, sync::Arc};
+use std::{fmt, sync::Arc};
 
 use anyhow::Context;
 use rmcp::{
@@ -22,7 +22,7 @@ struct ListChannelsResponse {
     channels: Vec<ChannelDetails>,
 }
 
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, serde::Serialize, schemars::JsonSchema)]
 struct ChannelDetails {
     id: Channel,
     name: ChannelName,
@@ -57,8 +57,8 @@ pub struct DLiveHandler {
 struct State {
     args: Arc<Args>,
     client: Option<DLiveClient>,
-    inputs: BTreeMap<ChannelName, Channel>,
-    mixes: BTreeMap<ChannelName, Channel>,
+    inputs: Vec<ChannelDetails>,
+    mixes: Vec<ChannelDetails>,
 }
 
 impl DLiveHandler {
@@ -67,8 +67,8 @@ impl DLiveHandler {
             state: Mutex::new(State {
                 args,
                 client: None,
-                inputs: BTreeMap::new(),
-                mixes: BTreeMap::new(),
+                inputs: Vec::new(),
+                mixes: Vec::new(),
             }),
         }
     }
@@ -83,49 +83,80 @@ impl State {
         }
         Ok(self.client.as_mut().unwrap())
     }
+
+    async fn list_inputs(&mut self) -> anyhow::Result<&[ChannelDetails]> {
+        if self.inputs.is_empty() {
+            let inputs = self.args.inputs.iter().collect::<Vec<_>>();
+
+            let client = self.client().await?;
+            let names = client.channel_names(&inputs).await?;
+
+            self.inputs = inputs
+                .into_iter()
+                .zip(names)
+                .map(|(id, name)| ChannelDetails { id, name })
+                .collect();
+        }
+        Ok(&self.inputs)
+    }
+
+    async fn list_mixes(&mut self) -> anyhow::Result<&[ChannelDetails]> {
+        if self.mixes.is_empty() {
+            let mixes = self.args.mixes.iter().collect::<Vec<_>>();
+
+            let client = self.client().await?;
+            let names = client.channel_names(&mixes).await?;
+
+            self.mixes = mixes
+                .into_iter()
+                .zip(names)
+                .map(|(id, name)| ChannelDetails { id, name })
+                .collect();
+        }
+        Ok(&self.mixes)
+    }
+
+    async fn input_id(&mut self, name: ChannelName) -> anyhow::Result<Channel> {
+        let inputs = self.list_inputs().await?;
+        dbg!(&inputs, name);
+        let details = inputs
+            .iter()
+            .find(|d| d.name == name)
+            .context("could not find an input with that exact name")?;
+        Ok(details.id)
+    }
+
+    async fn mix_id(&mut self, name: ChannelName) -> anyhow::Result<Channel> {
+        let mixes = self.list_mixes().await?;
+        dbg!(&mixes, name);
+        let details = mixes
+            .iter()
+            .find(|d| d.name == name)
+            .context("could not find a mix with that exact name")?;
+        Ok(details.id)
+    }
 }
 
 #[tool_router]
 impl DLiveHandler {
-    #[tool(description = "Get the names of the inputs. You must call this before any other tools.")]
+    #[tool(description = "Get the names of the inputs.")]
     async fn list_inputs(&self) -> Result<Json<ListChannelsResponse>, ErrorData> {
         let mut state = self.state.lock().await;
-        let inputs = state.args.inputs.iter().collect::<Vec<_>>();
-
-        let client = state.client().await.map_err(internal_error)?;
-        let names = client
-            .channel_names(&inputs)
-            .await
-            .map_err(internal_error)?;
-
-        state.inputs = names.iter().copied().zip(inputs.iter().copied()).collect();
+        let inputs = state.list_inputs().await.map_err(internal_error)?;
 
         let response = ListChannelsResponse {
-            channels: inputs
-                .into_iter()
-                .zip(names)
-                .map(|(id, name)| ChannelDetails { id, name })
-                .collect(),
+            channels: inputs.to_vec(),
         };
         Ok(Json(response))
     }
 
-    #[tool(description = "Get the names of the mixes. You must call this before any other tools.")]
+    #[tool(description = "Get the names of the mixes.")]
     async fn list_mixes(&self) -> Result<Json<ListChannelsResponse>, ErrorData> {
         let mut state = self.state.lock().await;
-        let mixes = state.args.mixes.iter().collect::<Vec<_>>();
-
-        let client = state.client().await.map_err(internal_error)?;
-        let names = client.channel_names(&mixes).await.map_err(internal_error)?;
-
-        state.mixes = names.iter().copied().zip(mixes.iter().copied()).collect();
+        let mixes = state.list_mixes().await.map_err(internal_error)?;
 
         let response = ListChannelsResponse {
-            channels: mixes
-                .into_iter()
-                .zip(names)
-                .map(|(id, name)| ChannelDetails { id, name })
-                .collect(),
+            channels: mixes.to_vec(),
         };
         Ok(Json(response))
     }
@@ -136,16 +167,8 @@ impl DLiveHandler {
         Parameters(GetInputLevelRequest { input, mix }): Parameters<GetInputLevelRequest>,
     ) -> Result<Json<InputLevelResponse>, ErrorData> {
         let mut state = self.state.lock().await;
-        let input_id = *state
-            .inputs
-            .get(&input)
-            .context("could not find input by name")
-            .map_err(internal_error)?;
-        let mix_id = *state
-            .mixes
-            .get(&mix)
-            .context("could not find mix by name")
-            .map_err(internal_error)?;
+        let input_id = state.input_id(input).await.map_err(internal_error)?;
+        let mix_id = state.mix_id(mix).await.map_err(internal_error)?;
 
         let client = state.client().await.map_err(internal_error)?;
         let level = client
@@ -163,16 +186,8 @@ impl DLiveHandler {
         Parameters(SetInputLevelRequest { input, mix, level }): Parameters<SetInputLevelRequest>,
     ) -> Result<Json<InputLevelResponse>, ErrorData> {
         let mut state = self.state.lock().await;
-        let input_id = *state
-            .inputs
-            .get(&input)
-            .context("could not find input by name")
-            .map_err(internal_error)?;
-        let mix_id = *state
-            .mixes
-            .get(&mix)
-            .context("could not find mix by name")
-            .map_err(internal_error)?;
+        let input_id = state.input_id(input).await.map_err(internal_error)?;
+        let mix_id = state.mix_id(mix).await.map_err(internal_error)?;
 
         let client = state.client().await.map_err(internal_error)?;
         client
