@@ -12,7 +12,6 @@ use crate::{
 };
 
 const SYSEX_HEADER: [u8; 7] = [0x00, 0x00, 0x1A, 0x50, 0x10, 0x01, 0x00];
-const CHANNEL_NAME_LEN: usize = 8;
 
 #[derive(Debug, Default)]
 pub struct DLiveCodec {
@@ -49,12 +48,11 @@ impl Encoder<Message> for DLiveCodec {
                 },
                 dst,
             ),
-            Message::ChannelName { channel, mut name } => self.encode_sysex(
+            Message::ChannelName { channel, name } => self.encode_sysex(
                 |buf| {
                     let (midi_channel, note) = channel.to_midi()?;
-                    sanitise_channel_name(&mut name);
                     buf.put_slice(&[midi_channel, 0x02, note]);
-                    buf.put_slice(name.as_bytes());
+                    buf.put_slice(&name.0);
                     Ok(())
                 },
                 dst,
@@ -100,13 +98,6 @@ impl Encoder<Message> for DLiveCodec {
     }
 }
 
-fn sanitise_channel_name(name: &mut String) {
-    name.truncate(CHANNEL_NAME_LEN);
-    while name.len() < CHANNEL_NAME_LEN {
-        name.push('\0');
-    }
-}
-
 impl Decoder for DLiveCodec {
     type Item = Message;
     type Error = anyhow::Error;
@@ -145,10 +136,9 @@ fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
             let note = raw.get_u8();
             let channel = Channel::from_midi(midi_channel, note)?;
 
-            let mut name = String::from_utf8(raw.to_vec())?;
-            if let Some(len) = name.find('\0') {
-                name.truncate(len);
-            }
+            let name = raw
+                .try_into()
+                .context("received a channel name longer than 8 bytes")?;
             raw = &[];
 
             Message::ChannelName { channel, name }
@@ -237,7 +227,7 @@ mod tests {
     fn test_encode_get_channel_name_response() {
         let message = Message::ChannelName {
             channel: Channel(ChannelType::Input, 42),
-            name: "Chan01".to_owned(),
+            name: "Chan01".parse().unwrap(),
         };
 
         let mut dst = BytesMut::new();
@@ -262,7 +252,7 @@ mod tests {
             message,
             Message::ChannelName {
                 channel: Channel(ChannelType::Input, 42),
-                name: "Chan01".to_owned()
+                name: "Chan01".parse().unwrap()
             }
         );
     }

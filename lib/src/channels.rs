@@ -3,10 +3,10 @@ use std::{fmt, ops::RangeInclusive, str::FromStr};
 use anyhow::Context;
 
 const BASE_MIDI_CHANNEL: u8 = 11;
+const CHANNEL_NAME_LEN: usize = 8;
 
 const PREFIXES: &[(ChannelType, &str)] = &[
     (ChannelType::Input, "Ip"),
-    (ChannelType::StereoInput, "StIp"),
     (ChannelType::MonoGroup, "Grp"),
     (ChannelType::StereoGroup, "StGrp"),
     (ChannelType::MonoAux, "Aux"),
@@ -60,9 +60,6 @@ pub struct Channel(pub ChannelType, pub u8);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ChannelType {
     Input,
-    /// Internally just a pair of inputs that have been tied together.
-    /// Has a spacing of two when iterated.
-    StereoInput,
     MonoGroup,
     StereoGroup,
     MonoAux,
@@ -79,10 +76,13 @@ pub enum ChannelType {
     StereoUFXReturn,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ChannelName(pub [u8; CHANNEL_NAME_LEN]);
+
 impl Channel {
     pub fn validate(self) -> anyhow::Result<()> {
         let range = match self.0 {
-            ChannelType::Input | ChannelType::StereoInput => 1..=128,
+            ChannelType::Input => 1..=128,
             ChannelType::MonoGroup | ChannelType::MonoAux | ChannelType::MonoMatrix => 1..=62,
             ChannelType::StereoGroup | ChannelType::StereoAux | ChannelType::StereoMatrix => 1..=31,
             ChannelType::MonoFxSend | ChannelType::StereoFxSend | ChannelType::FxReturn => 1..=16,
@@ -97,13 +97,6 @@ impl Channel {
             "{} channels must be between {range:?}",
             self.0,
         );
-        if self.0 == ChannelType::StereoInput {
-            anyhow::ensure!(
-                self.1 % 2 == 1,
-                "{} channels must have an odd number",
-                self.0
-            );
-        }
         Ok(())
     }
 
@@ -143,6 +136,16 @@ impl fmt::Display for ChannelType {
     }
 }
 
+impl fmt::Display for ChannelName {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let bytes = self.0;
+        let len = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+        let s = String::from_utf8_lossy(&bytes[..len]);
+        write!(f, "{s}")?;
+        Ok(())
+    }
+}
+
 impl FromStr for Channel {
     type Err = anyhow::Error;
 
@@ -170,6 +173,30 @@ impl FromStr for ChannelType {
             .find(|&&(_, a)| a == s)
             .with_context(|| format!("unknown channel type {s:?}"))?;
         Ok(ty)
+    }
+}
+
+impl FromStr for ChannelName {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s.as_bytes())
+    }
+}
+
+impl TryFrom<&[u8]> for ChannelName {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        anyhow::ensure!(
+            value.len() <= CHANNEL_NAME_LEN,
+            "channel name {:?} is more than 8 bytes long",
+            String::from_utf8_lossy(value)
+        );
+
+        let mut array = [0; CHANNEL_NAME_LEN];
+        array[..value.len()].copy_from_slice(value);
+        Ok(Self(array))
     }
 }
 

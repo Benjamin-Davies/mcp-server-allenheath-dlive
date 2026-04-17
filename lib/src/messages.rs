@@ -1,6 +1,8 @@
-use crate::channels::Channel;
+use std::fmt;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::channels::{Channel, ChannelName};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Level(pub u8);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,7 +12,7 @@ pub enum Message {
     },
     ChannelName {
         channel: Channel,
-        name: String,
+        name: ChannelName,
     },
     GetSendLevel {
         channel: Channel,
@@ -21,6 +23,11 @@ pub enum Message {
         send: Channel,
         level: Level,
     },
+}
+
+impl Level {
+    pub const ZERO: Self = Self(0x6B);
+    pub const NEG_INFINITY: Self = Self(0);
 }
 
 /// Converts a dLive 7-bit fader value (0x00–0x7F) to dB.
@@ -49,6 +56,13 @@ impl From<Level> for f32 {
 impl From<f32> for Level {
     fn from(value: f32) -> Self {
         Self(db_to_dlive_value(value))
+    }
+}
+
+impl fmt::Display for Level {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} dB", f32::from(*self))?;
+        Ok(())
     }
 }
 

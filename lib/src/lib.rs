@@ -11,7 +11,7 @@ use tokio::{
 use tokio_util::codec::Framed;
 
 use crate::{
-    channels::Channel,
+    channels::{Channel, ChannelName},
     codecs::DLiveCodec,
     messages::{Level, Message},
 };
@@ -20,7 +20,7 @@ pub mod channels;
 pub mod codecs;
 pub mod messages;
 
-const DLIVE_TCP_PORT: u16 = 51325;
+pub const DLIVE_TCP_PORT: u16 = 51325;
 
 #[derive(Debug)]
 pub struct DLiveClient<S = TcpStream> {
@@ -45,7 +45,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         }
     }
 
-    pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<String>> {
+    pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<ChannelName>> {
         for &channel in channels {
             self.stream
                 .send(Message::GetChannelName { channel })
@@ -68,7 +68,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
             };
             anyhow::ensure!(
                 res_channel == channel,
-                "Returned channel does not match request"
+                "Returned channel ({res_channel:?}) does not match request ({channel:?})"
             );
             names.push(name);
         }

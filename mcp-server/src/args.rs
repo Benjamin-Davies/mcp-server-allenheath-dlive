@@ -30,7 +30,12 @@ pub struct ChannelRangeList {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChannelRange(ChannelType, u8, u8);
+pub struct ChannelRange {
+    ty: ChannelType,
+    start: u8,
+    end: u8,
+    step: u8,
+}
 
 impl ChannelRangeList {
     pub fn iter(&self) -> impl Iterator<Item = Channel> {
@@ -40,11 +45,9 @@ impl ChannelRangeList {
 
 impl ChannelRange {
     pub fn iter(&self) -> impl Iterator<Item = Channel> {
-        let step = match self.0 {
-            ChannelType::StereoInput => 2,
-            _ => 1,
-        };
-        (self.1..=self.2).step_by(step).map(|n| Channel(self.0, n))
+        (self.start..=self.end)
+            .step_by(self.step as usize)
+            .map(|n| Channel(self.ty, n))
     }
 }
 
@@ -68,10 +71,13 @@ impl fmt::Display for ChannelRangeList {
 
 impl fmt::Display for ChannelRange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.1 == self.2 {
-            write!(f, "{}{}", self.0, self.1)?;
+        if self.step == 2 {
+            write!(f, "St")?;
+        }
+        if self.start == self.end {
+            write!(f, "{}{}", self.ty, self.start)?;
         } else {
-            write!(f, "{}{}-{}", self.0, self.1, self.2)?;
+            write!(f, "{}{}-{}", self.ty, self.start, self.end)?;
         }
         Ok(())
     }
@@ -92,7 +98,15 @@ impl FromStr for ChannelRangeList {
 impl FromStr for ChannelRange {
     type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(mut s: &str) -> Result<Self, Self::Err> {
+        let step;
+        if s.starts_with("StIp") {
+            s = s.strip_prefix("St").unwrap();
+            step = 2;
+        } else {
+            step = 1;
+        }
+
         let prefix_len = s
             .find(|c: char| c.is_digit(10))
             .context("channel name has no number")?;
@@ -109,7 +123,12 @@ impl FromStr for ChannelRange {
         Channel(ty, start).validate()?;
         Channel(ty, end).validate()?;
 
-        Ok(ChannelRange(ty, start, end))
+        Ok(ChannelRange {
+            ty,
+            start,
+            end,
+            step,
+        })
     }
 }
 
@@ -123,10 +142,30 @@ mod tests {
     fn test_format_channel_range_list() {
         let ranges = ChannelRangeList {
             ranges: vec![
-                ChannelRange(ChannelType::Dca, 16, 20),
-                ChannelRange(ChannelType::Input, 49, 68),
-                ChannelRange(ChannelType::StereoInput, 69, 85),
-                ChannelRange(ChannelType::Input, 123, 123),
+                ChannelRange {
+                    ty: ChannelType::Dca,
+                    start: 16,
+                    end: 20,
+                    step: 1,
+                },
+                ChannelRange {
+                    ty: ChannelType::Input,
+                    start: 49,
+                    end: 68,
+                    step: 1,
+                },
+                ChannelRange {
+                    ty: ChannelType::Input,
+                    start: 69,
+                    end: 85,
+                    step: 2,
+                },
+                ChannelRange {
+                    ty: ChannelType::Input,
+                    start: 123,
+                    end: 123,
+                    step: 1,
+                },
             ],
         };
         let s = "DCA16-20,Ip49-68,StIp69-85,Ip123";
@@ -138,10 +177,30 @@ mod tests {
     fn test_parse_channel_range_list() {
         let ranges = ChannelRangeList {
             ranges: vec![
-                ChannelRange(ChannelType::Dca, 16, 20),
-                ChannelRange(ChannelType::Input, 49, 68),
-                ChannelRange(ChannelType::StereoInput, 69, 85),
-                ChannelRange(ChannelType::Input, 123, 123),
+                ChannelRange {
+                    ty: ChannelType::Dca,
+                    start: 16,
+                    end: 20,
+                    step: 1,
+                },
+                ChannelRange {
+                    ty: ChannelType::Input,
+                    start: 49,
+                    end: 68,
+                    step: 1,
+                },
+                ChannelRange {
+                    ty: ChannelType::Input,
+                    start: 69,
+                    end: 85,
+                    step: 2,
+                },
+                ChannelRange {
+                    ty: ChannelType::Input,
+                    start: 123,
+                    end: 123,
+                    step: 1,
+                },
             ],
         };
         let s = "DCA16-20,Ip49-68,StIp69-85,Ip123";
@@ -151,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_iter_input_range() {
-        let range = ChannelRange(ChannelType::Input, 3, 7);
+        let range = "Ip3-7".parse::<ChannelRange>().unwrap();
         assert_eq!(
             range.iter().collect::<Vec<_>>(),
             vec![
@@ -166,20 +225,20 @@ mod tests {
 
     #[test]
     fn test_iter_stereo_input_range() {
-        let range = ChannelRange(ChannelType::StereoInput, 3, 7);
+        let range = "StIp3-7".parse::<ChannelRange>().unwrap();
         assert_eq!(
             range.iter().collect::<Vec<_>>(),
             vec![
-                Channel(ChannelType::StereoInput, 3),
-                Channel(ChannelType::StereoInput, 5),
-                Channel(ChannelType::StereoInput, 7),
+                Channel(ChannelType::Input, 3),
+                Channel(ChannelType::Input, 5),
+                Channel(ChannelType::Input, 7),
             ]
         );
     }
 
     #[test]
     fn test_iter_aux_range() {
-        let range = ChannelRange(ChannelType::MonoAux, 3, 7);
+        let range = "Aux3-7".parse::<ChannelRange>().unwrap();
         assert_eq!(
             range.iter().collect::<Vec<_>>(),
             vec![
@@ -194,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_iter_stereo_aux_range() {
-        let range = ChannelRange(ChannelType::StereoAux, 3, 7);
+        let range = "StAux3-7".parse::<ChannelRange>().unwrap();
         assert_eq!(
             range.iter().collect::<Vec<_>>(),
             vec![

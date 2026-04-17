@@ -34,14 +34,15 @@ pub struct DLiveHandler {
 
 #[derive(Debug)]
 struct State {
+    args: Arc<Args>,
     client: Option<DLiveClient>,
 }
 
 impl DLiveHandler {
     pub fn new(args: Arc<Args>) -> Self {
         Self {
-            args,
-            state: Mutex::new(State { client: None }),
+            args: args.clone(),
+            state: Mutex::new(State { args, client: None }),
         }
     }
 }
@@ -49,9 +50,8 @@ impl DLiveHandler {
 impl State {
     async fn client(&mut self) -> &mut DLiveClient {
         if self.client.is_none() {
-            let client = DLiveClient::new("10.6.103.10".parse().unwrap())
-                .await
-                .unwrap();
+            let addr = self.args.ip;
+            let client = DLiveClient::new(addr).await.unwrap();
             self.client = Some(client);
         }
         self.client.as_mut().unwrap()
@@ -72,7 +72,11 @@ impl DLiveHandler {
         let inputs = self.args.inputs.iter().collect::<Vec<_>>();
         // TODO: cache names so that they can be used for all commands
         match client.channel_names(&inputs).await {
-            Ok(inputs) => inputs.join(","),
+            Ok(inputs) => inputs
+                .into_iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
             Err(err) => err.to_string(),
         }
     }
@@ -84,7 +88,11 @@ impl DLiveHandler {
         let inputs = self.args.mixes.iter().collect::<Vec<_>>();
         // TODO: cache names so that they can be used for all commands
         match client.channel_names(&inputs).await {
-            Ok(inputs) => inputs.join(","),
+            Ok(inputs) => inputs
+                .into_iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
             Err(err) => err.to_string(),
         }
     }

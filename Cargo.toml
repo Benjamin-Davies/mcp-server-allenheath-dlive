@@ -1,3 +1,5 @@
 [workspace]
-members = ["mcp-server", "lib"]
+members = ["mcp-server", "lib", "fake-dlive"]
 resolver = "3"
+
+default-run = "fake-dlive"
