@@ -11,6 +11,8 @@ dependencies = [
  "futures",
  "hex",
  "midi-stream",
+ "schemars",
+ "serde",
  "tokio",
  "tokio-util",
  "tracing",

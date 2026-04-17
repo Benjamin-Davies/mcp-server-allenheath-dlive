@@ -1,4 +1,4 @@
-use std::{fmt, ops::RangeInclusive, str::FromStr};
+use std::{borrow::Cow, fmt, ops::RangeInclusive, str::FromStr};
 
 use anyhow::Context;
 
@@ -197,6 +197,79 @@ impl TryFrom<&[u8]> for ChannelName {
         let mut array = [0; CHANNEL_NAME_LEN];
         array[..value.len()].copy_from_slice(value);
         Ok(Self(array))
+    }
+}
+
+impl serde::Serialize for Channel {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
+impl serde::Serialize for ChannelName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_string().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Channel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ChannelName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for Channel {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "Channel".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "%comment": "A channel ID of the form \"<type><number>\"",
+            "type": "string",
+        })
+    }
+}
+
+impl schemars::JsonSchema for ChannelName {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "ChannelName".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "%comment": "The ASCII name of a channel",
+            "type": "string",
+            "maxLength": CHANNEL_NAME_LEN,
+        })
     }
 }
 

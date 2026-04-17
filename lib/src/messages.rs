@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use crate::channels::{Channel, ChannelName};
 
@@ -63,6 +63,69 @@ impl fmt::Display for Level {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} dB", f32::from(*self))?;
         Ok(())
+    }
+}
+
+impl serde::Serialize for Level {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if *self == Self::NEG_INFINITY {
+            "-inf".serialize(serializer)
+        } else {
+            f32::from(*self).serialize(serializer)
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Level {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Inner {
+            String(String),
+            Float(f32),
+        }
+
+        match Inner::deserialize(deserializer)? {
+            Inner::String(s) if s == "-inf" => Ok(Self::NEG_INFINITY),
+            Inner::Float(db @ -50.0..=10.0) => Ok(db.into()),
+            _ => Err(serde::de::Error::custom(
+                "expected a float between -50 and +10 or the string \"-inf\"",
+            )),
+        }
+    }
+}
+
+impl schemars::JsonSchema for Level {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        "Level".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "oneOf": [
+                {
+                    "$comment": "A number of dB to 1 decimal place",
+                    "type": "number",
+                    "minimum": -50,
+                    "maximum": 10,
+                },
+                {
+                    "$comment": "Muted",
+                    "type": "string",
+                    "const": "-inf",
+                },
+            ]
+        })
     }
 }
 
