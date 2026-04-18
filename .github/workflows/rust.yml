@@ -25,5 +25,5 @@ jobs:
       with:
         name: mcp-server-allenheath-dlive
         path: |
-          target/debug/mcp-server-allenheath-dlive
-          target/debug/fake-dlive
+          target/release/mcp-server-allenheath-dlive
+          target/release/fake-dlive
