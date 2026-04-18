@@ -1,0 +1,29 @@
+name: Rust
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run tests
+      run: cargo test --verbose
+    - name: Release build
+      run: cargo build --verbose --release
+    - name: Upload executables
+      uses: actions/upload-artifact@v4
+      with:
+        name: mcp-server-allenheath-dlive
+        path: |
+          target/debug/mcp-server-allenheath-dlive
+          target/debug/fake-dlive
