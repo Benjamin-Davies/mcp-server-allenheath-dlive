@@ -19,7 +19,9 @@ mod handler;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenvy::dotenv()?;
+    if dotenvy::dotenv().is_err() {
+        eprintln!("Couldn't load env file");
+    }
     tracing_subscriber::fmt().init();
 
     let args = Args::parse();
