@@ -9,7 +9,7 @@ use clap::Parser;
 pub struct Args {
     /// Authentication token for clients
     #[arg(long, env = "AUTH_TOKEN")]
-    pub token: String,
+    pub token: Option<String>,
 
     /// IP address of the mix rack
     #[arg(long, env = "DLIVE_IP")]
