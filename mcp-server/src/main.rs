@@ -1,12 +1,6 @@
 use std::sync::Arc;
 
-use axum::{
-    Router,
-    extract::{Request, State},
-    http::StatusCode,
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
-};
+use axum::{Router, middleware};
 use clap::Parser;
 use rmcp::transport::{
     StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
@@ -15,6 +9,7 @@ use rmcp::transport::{
 use crate::{args::Args, handler::DLiveHandler};
 
 mod args;
+mod auth;
 mod handler;
 
 #[tokio::main]
@@ -40,37 +35,10 @@ async fn main() -> anyhow::Result<()> {
             .nest_service("/mcp", mcp_service)
             .layer(middleware::from_fn_with_state(
                 args,
-                validate_token_middleware,
+                auth::validate_token_middleware,
             ));
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     tracing::info!("Listening on {:?}", listener.local_addr().unwrap());
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn validate_token_middleware(
-    State(args): State<Arc<Args>>,
-    request: Request,
-    next: Next,
-) -> Response {
-    if let Some(token) = &args.token {
-        let Some(t) = extract_token(&request) else {
-            return StatusCode::UNAUTHORIZED.into_response();
-        };
-        if t != token {
-            return StatusCode::UNAUTHORIZED.into_response();
-        }
-    }
-
-    let response = next.run(request).await;
-    response
-}
-
-fn extract_token(request: &Request) -> Option<&str> {
-    request
-        .headers()
-        .get("Authorization")?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
 }
