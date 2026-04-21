@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, net::Ipv4Addr, sync::Arc};
 
 use allenheath_dlive::{
     DLIVE_TCP_PORT,
-    channels::Channel,
+    channels::{Channel, ChannelName},
     codecs::DLiveCodec,
     messages::{Level, Message},
 };
@@ -15,6 +15,7 @@ use tokio_util::codec::Framed;
 
 #[derive(Debug, Default)]
 struct State {
+    channel_names: BTreeMap<Channel, ChannelName>,
     send_levels: BTreeMap<(Channel, Channel), Level>,
     fader_levels: BTreeMap<Channel, Level>,
 }
@@ -23,10 +24,16 @@ struct State {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
 
+    let channel_names_json = tokio::fs::read_to_string("channel-names.json").await?;
+    let channel_names = serde_json::from_str(&channel_names_json)?;
+
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, DLIVE_TCP_PORT)).await?;
     tracing::info!("Listening at {}", listener.local_addr()?);
 
-    let state = Arc::new(Mutex::new(State::default()));
+    let state = Arc::new(Mutex::new(State {
+        channel_names,
+        ..Default::default()
+    }));
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -51,7 +58,12 @@ async fn handle_connection(stream: TcpStream, state: Arc<Mutex<State>>) -> anyho
     while let Some(message) = stream.try_next().await? {
         match message {
             Message::GetChannelName { channel } => {
-                let name = format!("@{channel}").parse().unwrap();
+                let state = state.lock().await;
+                let name = state
+                    .channel_names
+                    .get(&channel)
+                    .copied()
+                    .unwrap_or_else(|| format!("@{channel}").parse().unwrap());
                 stream.send(Message::ChannelName { channel, name }).await?;
             }
             Message::ChannelName { .. } => {

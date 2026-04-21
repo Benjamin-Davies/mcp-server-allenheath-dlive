@@ -343,6 +343,7 @@ dependencies = [
  "allenheath-dlive",
  "anyhow",
  "futures",
+ "serde_json",
  "tokio",
  "tokio-util",
  "tracing",
