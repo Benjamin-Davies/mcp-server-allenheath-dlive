@@ -1,4 +1,4 @@
-use std::{fmt, sync::Arc};
+use std::{fmt, ops::AddAssign, sync::Arc};
 
 use anyhow::Context;
 use rmcp::{
@@ -28,6 +28,19 @@ struct ChannelDetails {
     name: ChannelName,
 }
 
+#[derive(Debug, Clone, Copy, serde::Deserialize, schemars::JsonSchema)]
+struct LevelDelta {
+    /// The amount to adjust by. Positive for increase, negative for decrease.
+    amount: f32,
+    unit: LevelDeltaUnit,
+}
+
+#[derive(Debug, Clone, Copy, serde::Deserialize, schemars::JsonSchema)]
+enum LevelDeltaUnit {
+    Decibels,
+    Percentage,
+}
+
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 struct GetInputLevelRequest {
     input: ChannelName,
@@ -39,6 +52,13 @@ struct SetInputLevelRequest {
     input: ChannelName,
     mix: ChannelName,
     level: Level,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct AdjustInputLevelRequest {
+    input: ChannelName,
+    mix: ChannelName,
+    delta: LevelDelta,
 }
 
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
@@ -57,6 +77,12 @@ struct GetMixLevelRequest {
 struct SetMixLevelRequest {
     mix: ChannelName,
     level: Level,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct AdjustMixLevelRequest {
+    mix: ChannelName,
+    delta: LevelDelta,
 }
 
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
@@ -214,6 +240,32 @@ impl DLiveHandler {
         Ok(Json(response))
     }
 
+    #[tool(description = "Increases or decreases the level of an input in a mix.")]
+    async fn adjust_input_level(
+        &self,
+        Parameters(AdjustInputLevelRequest { input, mix, delta }): Parameters<
+            AdjustInputLevelRequest,
+        >,
+    ) -> Result<Json<InputLevelResponse>, ErrorData> {
+        let mut state = self.state.lock().await;
+        let input_id = state.input_id(input).await.map_err(internal_error)?;
+        let mix_id = state.mix_id(mix).await.map_err(internal_error)?;
+
+        let client = state.client().await.map_err(internal_error)?;
+        let mut level = client
+            .send_level(input_id, mix_id)
+            .await
+            .map_err(internal_error)?;
+        level += delta;
+        client
+            .set_send_level(input_id, mix_id, level)
+            .await
+            .map_err(internal_error)?;
+
+        let response = InputLevelResponse { input, mix, level };
+        Ok(Json(response))
+    }
+
     #[tool(description = "Gets the level of a mix.")]
     async fn get_mix_level(
         &self,
@@ -246,6 +298,26 @@ impl DLiveHandler {
         let response = MixLevelResponse { mix, level };
         Ok(Json(response))
     }
+
+    #[tool(description = "Increases or decreases the level of a mix.")]
+    async fn adjust_mix_level(
+        &self,
+        Parameters(AdjustMixLevelRequest { mix, delta }): Parameters<AdjustMixLevelRequest>,
+    ) -> Result<Json<MixLevelResponse>, ErrorData> {
+        let mut state = self.state.lock().await;
+        let mix_id = state.mix_id(mix).await.map_err(internal_error)?;
+
+        let client = state.client().await.map_err(internal_error)?;
+        let mut level = client.fader_level(mix_id).await.map_err(internal_error)?;
+        level += delta;
+        client
+            .set_fader_level(mix_id, level)
+            .await
+            .map_err(internal_error)?;
+
+        let response = MixLevelResponse { mix, level };
+        Ok(Json(response))
+    }
 }
 
 #[tool_handler]
@@ -263,4 +335,20 @@ impl ServerHandler for DLiveHandler {
 
 fn internal_error(err: impl fmt::Display) -> ErrorData {
     ErrorData::internal_error(err.to_string(), None)
+}
+
+impl LevelDelta {
+    fn to_db(self) -> f32 {
+        match self.unit {
+            LevelDeltaUnit::Decibels => self.amount,
+            LevelDeltaUnit::Percentage => 20.0 * (1.0 + self.amount / 100.0).log10(),
+        }
+    }
+}
+
+impl AddAssign<LevelDelta> for Level {
+    fn add_assign(&mut self, rhs: LevelDelta) {
+        let db = f32::from(*self) + rhs.to_db();
+        *self = db.into();
+    }
 }
