@@ -1,13 +1,13 @@
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
 use allenheath_dlive::{
-    DLIVE_SURFACE_TCP_PORT, DLiveClient,
+    DLIVE_FAKE_TCP_PORT, DLiveClient,
     channels::{Channel, ChannelType},
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let mut client = DLiveClient::new((Ipv4Addr::LOCALHOST, DLIVE_SURFACE_TCP_PORT).into()).await?;
+    let mut client = DLiveClient::new((Ipv4Addr::LOCALHOST, DLIVE_FAKE_TCP_PORT).into()).await?;
 
     let channels = [
         (ChannelType::Input, 1..=128),
