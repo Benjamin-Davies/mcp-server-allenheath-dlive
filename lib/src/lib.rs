@@ -1,6 +1,6 @@
 //! https://www.allen-heath.com/content/uploads/2024/06/dLive-MIDI-Over-TCP-Protocol-V2.0.pdf
 
-use std::{fmt::Debug, io, net::SocketAddr, pin::Pin, time::Duration};
+use std::{fmt::Debug, io, net::SocketAddr, pin::Pin, task, time::Duration};
 
 use anyhow::Result;
 use futures::{SinkExt, StreamExt};
@@ -61,6 +61,13 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
         }
     }
 
+    fn drop_unread(&mut self) {
+        let mut cx = task::Context::from_waker(task::Waker::noop());
+        while let task::Poll::Ready(_) = self.stream.poll_next_unpin(&mut cx) {
+            // Drop all unread messages
+        }
+    }
+
     async fn wait_until<T>(&mut self, mut f: impl FnMut(Message) -> Option<T>) -> Result<T> {
         timeout(REQUEST_TIMEOUT, async {
             while let Some(message) = self.stream.next().await.transpose()? {
@@ -76,6 +83,8 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
 
     #[tracing::instrument]
     pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<ChannelName>> {
+        self.drop_unread();
+
         for &channel in channels {
             self.stream
                 .send(Message::GetChannelName { channel })
@@ -92,6 +101,8 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
 
     #[tracing::instrument]
     pub async fn send_level(&mut self, channel: Channel, send: Channel) -> Result<Level> {
+        self.drop_unread();
+
         self.stream
             .send(Message::GetSendLevel { channel, send })
             .await?;
@@ -121,6 +132,8 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
 
     #[tracing::instrument]
     pub async fn fader_level(&mut self, channel: Channel) -> Result<Level> {
+        self.drop_unread();
+
         self.stream.send(Message::GetFaderLevel { channel }).await?;
 
         let level =
