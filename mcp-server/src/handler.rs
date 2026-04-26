@@ -135,7 +135,7 @@ impl State {
                     }
                     Err(err) => {
                         tracing::error!("{err}");
-                        anyhow::bail!("Failed to connect to dLive");
+                        break;
                     }
                 }
             }

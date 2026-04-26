@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, net::Ipv4Addr, sync::Arc};
 
 use allenheath_dlive::{
-    DLIVE_MIXRACK_TCP_PORT,
+    DLIVE_FAKE_TCP_PORT,
     channels::{Channel, ChannelName},
     codecs::DLiveCodec,
     messages::{Level, Message},
@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     let channel_names_json = tokio::fs::read_to_string("channel-names.json").await?;
     let channel_names = serde_json::from_str(&channel_names_json)?;
 
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, DLIVE_MIXRACK_TCP_PORT)).await?;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, DLIVE_FAKE_TCP_PORT)).await?;
     tracing::info!("Listening at {}", listener.local_addr()?);
 
     let state = Arc::new(Mutex::new(State {
