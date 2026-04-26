@@ -1,6 +1,6 @@
 //! https://www.allen-heath.com/content/uploads/2024/06/dLive-MIDI-Over-TCP-Protocol-V2.0.pdf
 
-use std::{net::IpAddr, pin::Pin};
+use std::{io, net::SocketAddr, pin::Pin};
 
 use anyhow::{Context as _, Result};
 use futures::{SinkExt, StreamExt};
@@ -20,7 +20,9 @@ pub mod channels;
 pub mod codecs;
 pub mod messages;
 
-pub const DLIVE_TCP_PORT: u16 = 51325;
+pub const DLIVE_MIXRACK_TCP_PORT: u16 = 51325;
+pub const DLIVE_SURFACE_TCP_PORT: u16 = 51328;
+pub const DLIVE_FAKE_TCP_PORT: u16 = 51331;
 
 #[derive(Debug)]
 pub struct DLiveClient<S = TcpStream> {
@@ -28,11 +30,9 @@ pub struct DLiveClient<S = TcpStream> {
 }
 
 impl DLiveClient<TcpStream> {
-    /// Connects to the DLive mix-rack without TLS.
-    pub async fn new(addr: IpAddr) -> Result<Self> {
-        let stream = TcpStream::connect((addr, DLIVE_TCP_PORT))
-            .await
-            .with_context(|| format!("Failed to connect to dLive MixRack at {addr}"))?;
+    /// Connects to the dLive without TLS.
+    pub async fn new(addr: SocketAddr) -> io::Result<Self> {
+        let stream = TcpStream::connect(addr).await?;
 
         Ok(Self::with_stream(stream))
     }

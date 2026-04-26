@@ -1,4 +1,4 @@
-use std::{fmt, ops::AddAssign, sync::Arc};
+use std::{any, fmt, io, ops::AddAssign, sync::Arc};
 
 use anyhow::Context;
 use rmcp::{
@@ -10,7 +10,7 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use allenheath_dlive::{
-    DLiveClient,
+    DLIVE_FAKE_TCP_PORT, DLIVE_MIXRACK_TCP_PORT, DLIVE_SURFACE_TCP_PORT, DLiveClient,
     channels::{Channel, ChannelName},
     messages::Level,
 };
@@ -120,11 +120,28 @@ impl DLiveHandler {
 impl State {
     async fn client(&mut self) -> anyhow::Result<&mut DLiveClient> {
         if self.client.is_none() {
-            let addr = self.args.ip;
-            let client = DLiveClient::new(addr).await?;
-            self.client = Some(client);
+            let ip_addr = self.args.ip;
+            for port in [
+                DLIVE_MIXRACK_TCP_PORT,
+                DLIVE_SURFACE_TCP_PORT,
+                DLIVE_FAKE_TCP_PORT,
+            ] {
+                let addr = (ip_addr, port).into();
+                match DLiveClient::new(addr).await {
+                    Ok(client) => self.client = Some(client),
+                    Err(err) if err.kind() == io::ErrorKind::ConnectionRefused => {
+                        tracing::warn!("No dLive at {addr}");
+                        continue;
+                    }
+                    Err(err) => {
+                        tracing::error!("{err}");
+                        anyhow::bail!("Failed to connect to dLive");
+                    }
+                }
+            }
         }
-        Ok(self.client.as_mut().unwrap())
+
+        self.client.as_mut().context("Failed to connect to dLive")
     }
 
     async fn list_inputs(&mut self) -> anyhow::Result<&[ChannelDetails]> {
