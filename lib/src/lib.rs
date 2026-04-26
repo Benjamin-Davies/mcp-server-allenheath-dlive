@@ -1,12 +1,13 @@
 //! https://www.allen-heath.com/content/uploads/2024/06/dLive-MIDI-Over-TCP-Protocol-V2.0.pdf
 
-use std::{io, net::SocketAddr, pin::Pin};
+use std::{fmt::Debug, io, net::SocketAddr, pin::Pin, time::Duration};
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
+    time::timeout,
 };
 use tokio_util::codec::Framed;
 
@@ -25,6 +26,8 @@ pub const DLIVE_SURFACE_TCP_PORT: u16 = 51328;
 /// Non-standard port. Used specifically for the `fake-dlive` crate.
 pub const DLIVE_FAKE_TCP_PORT: u16 = 51331;
 
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Debug)]
 pub struct DLiveClient<S = TcpStream> {
     stream: Pin<Box<Framed<S, DLiveCodec>>>,
@@ -39,11 +42,34 @@ impl DLiveClient<TcpStream> {
     }
 }
 
+macro_rules! wait_until {
+    ($self:expr, $pat:pat $(if $cond:expr)? => $res:expr) => {
+        $self.wait_until(|m| match m {
+            $pat $(if $cond)? => Some($res),
+            _ => None,
+        })
+        .await?
+    };
+}
+
 impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
     pub fn with_stream(stream: S) -> Self {
         Self {
             stream: Box::pin(Framed::new(stream, DLiveCodec::default())),
         }
+    }
+
+    async fn wait_until<T>(&mut self, mut f: impl FnMut(Message) -> Option<T>) -> Result<T> {
+        timeout(REQUEST_TIMEOUT, async {
+            while let Some(message) = self.stream.next().await.transpose()? {
+                if let Some(res) = f(message.clone()) {
+                    return Ok(res);
+                }
+                tracing::info!("Unexpected message: {message:?}")
+            }
+            anyhow::bail!("Unexpected end of stream");
+        })
+        .await?
     }
 
     pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<ChannelName>> {
@@ -55,22 +81,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
 
         let mut names = Vec::new();
         for &channel in channels {
-            let response = self
-                .stream
-                .next()
-                .await
-                .context("Unexpected end of stream")??;
-            let Message::ChannelName {
-                channel: res_channel,
-                name,
-            } = response
-            else {
-                anyhow::bail!("Unexpected message: {response:?}");
-            };
-            anyhow::ensure!(
-                res_channel == channel,
-                "Returned channel ({res_channel:?}) does not match request ({channel:?})"
-            );
+            let name = wait_until!(self, Message::ChannelName { channel: c, name } if c == channel => name);
             names.push(name);
         }
         Ok(names)
@@ -81,24 +92,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
             .send(Message::GetSendLevel { channel, send })
             .await?;
 
-        let response = self
-            .stream
-            .next()
-            .await
-            .context("Unexpected end of stream")??;
-        let Message::SendLevel {
-            channel: res_channel,
-            send: res_send,
-            level,
-        } = response
-        else {
-            anyhow::bail!("Unexpected message: {response:?}");
-        };
-        anyhow::ensure!(
-            res_channel == channel,
-            "Returned channel does not match request"
-        );
-        anyhow::ensure!(res_send == send, "Returned send does not match request");
+        let level = wait_until!(self, Message::SendLevel { channel: c, send: s, level } if c == channel && s == send => level);
 
         Ok(level)
     }
@@ -123,22 +117,8 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
     pub async fn fader_level(&mut self, channel: Channel) -> Result<Level> {
         self.stream.send(Message::GetFaderLevel { channel }).await?;
 
-        let response = self
-            .stream
-            .next()
-            .await
-            .context("Unexpected end of stream")??;
-        let Message::FaderLevel {
-            channel: res_channel,
-            level,
-        } = response
-        else {
-            anyhow::bail!("Unexpected message: {response:?}");
-        };
-        anyhow::ensure!(
-            res_channel == channel,
-            "Returned channel does not match request"
-        );
+        let level =
+            wait_until!(self, Message::FaderLevel { channel: c, level } if c == channel => level);
 
         Ok(level)
     }
