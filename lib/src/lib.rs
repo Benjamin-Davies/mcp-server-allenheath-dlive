@@ -35,6 +35,7 @@ pub struct DLiveClient<S = TcpStream> {
 
 impl DLiveClient<TcpStream> {
     /// Connects to the dLive without TLS.
+    #[tracing::instrument]
     pub async fn new(addr: SocketAddr) -> io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
 
@@ -52,7 +53,8 @@ macro_rules! wait_until {
     };
 }
 
-impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
+impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
+    #[tracing::instrument]
     pub fn with_stream(stream: S) -> Self {
         Self {
             stream: Box::pin(Framed::new(stream, DLiveCodec::default())),
@@ -72,6 +74,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         .await?
     }
 
+    #[tracing::instrument]
     pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<ChannelName>> {
         for &channel in channels {
             self.stream
@@ -87,6 +90,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         Ok(names)
     }
 
+    #[tracing::instrument]
     pub async fn send_level(&mut self, channel: Channel, send: Channel) -> Result<Level> {
         self.stream
             .send(Message::GetSendLevel { channel, send })
@@ -97,6 +101,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         Ok(level)
     }
 
+    #[tracing::instrument]
     pub async fn set_send_level(
         &mut self,
         channel: Channel,
@@ -114,6 +119,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         Ok(())
     }
 
+    #[tracing::instrument]
     pub async fn fader_level(&mut self, channel: Channel) -> Result<Level> {
         self.stream.send(Message::GetFaderLevel { channel }).await?;
 
@@ -123,6 +129,7 @@ impl<S: AsyncRead + AsyncWrite> DLiveClient<S> {
         Ok(level)
     }
 
+    #[tracing::instrument]
     pub async fn set_fader_level(&mut self, channel: Channel, level: Level) -> Result<()> {
         self.stream
             .send(Message::FaderLevel { channel, level })

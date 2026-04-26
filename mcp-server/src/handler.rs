@@ -105,6 +105,7 @@ struct State {
 }
 
 impl DLiveHandler {
+    #[tracing::instrument]
     pub fn new(args: Arc<Args>) -> Self {
         Self {
             state: Mutex::new(State {
@@ -118,6 +119,7 @@ impl DLiveHandler {
 }
 
 impl State {
+    #[tracing::instrument(skip(self))]
     async fn client(&mut self) -> anyhow::Result<&mut DLiveClient> {
         if self.client.is_none() {
             let ip_addr = self.args.ip;
@@ -144,6 +146,7 @@ impl State {
         self.client.as_mut().context("Failed to connect to dLive")
     }
 
+    #[tracing::instrument(skip(self))]
     async fn list_inputs(&mut self) -> anyhow::Result<&[ChannelDetails]> {
         if self.inputs.is_empty() {
             let inputs = self.args.inputs.iter().collect::<Vec<_>>();
@@ -160,6 +163,7 @@ impl State {
         Ok(&self.inputs)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn list_mixes(&mut self) -> anyhow::Result<&[ChannelDetails]> {
         if self.mixes.is_empty() {
             let mixes = self.args.mixes.iter().collect::<Vec<_>>();
@@ -176,6 +180,7 @@ impl State {
         Ok(&self.mixes)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn input_id(&mut self, name: ChannelName) -> anyhow::Result<Channel> {
         let inputs = self.list_inputs().await?;
         let details = inputs
@@ -185,6 +190,7 @@ impl State {
         Ok(details.internal)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn mix_id(&mut self, name: ChannelName) -> anyhow::Result<Channel> {
         let mixes = self.list_mixes().await?;
         let details = mixes
@@ -198,6 +204,7 @@ impl State {
 #[tool_router]
 impl DLiveHandler {
     #[tool(description = "Get the names of the inputs.")]
+    #[tracing::instrument(skip(self))]
     async fn list_inputs(&self) -> Result<Json<ListChannelsResponse>, ErrorData> {
         let mut state = self.state.lock().await;
         let inputs = state.list_inputs().await.map_err(internal_error)?;
@@ -209,6 +216,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Get the names of the mixes.")]
+    #[tracing::instrument(skip(self))]
     async fn list_mixes(&self) -> Result<Json<ListChannelsResponse>, ErrorData> {
         let mut state = self.state.lock().await;
         let mixes = state.list_mixes().await.map_err(internal_error)?;
@@ -220,6 +228,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Gets the level of an input in a mix.")]
+    #[tracing::instrument(skip(self))]
     async fn get_input_level(
         &self,
         Parameters(GetInputLevelRequest { input, mix }): Parameters<GetInputLevelRequest>,
@@ -239,6 +248,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Sets the level of an input in a mix.")]
+    #[tracing::instrument(skip(self))]
     async fn set_input_level(
         &self,
         Parameters(SetInputLevelRequest { input, mix, level }): Parameters<SetInputLevelRequest>,
@@ -258,6 +268,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Increases or decreases the level of an input in a mix.")]
+    #[tracing::instrument(skip(self))]
     async fn adjust_input_level(
         &self,
         Parameters(AdjustInputLevelRequest { input, mix, delta }): Parameters<
@@ -284,6 +295,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Gets the level of a mix.")]
+    #[tracing::instrument(skip(self))]
     async fn get_mix_level(
         &self,
         Parameters(GetMixLevelRequest { mix }): Parameters<GetMixLevelRequest>,
@@ -299,6 +311,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Sets the level of a mix.")]
+    #[tracing::instrument(skip(self))]
     async fn set_mix_level(
         &self,
         Parameters(SetMixLevelRequest { mix, level }): Parameters<SetMixLevelRequest>,
@@ -317,6 +330,7 @@ impl DLiveHandler {
     }
 
     #[tool(description = "Increases or decreases the level of a mix.")]
+    #[tracing::instrument(skip(self))]
     async fn adjust_mix_level(
         &self,
         Parameters(AdjustMixLevelRequest { mix, delta }): Parameters<AdjustMixLevelRequest>,
@@ -339,6 +353,7 @@ impl DLiveHandler {
 
 #[tool_handler]
 impl ServerHandler for DLiveHandler {
+    #[tracing::instrument(skip(self))]
     fn get_info(&self) -> ServerInfo {
         let capabilities = ServerCapabilities::builder().enable_tools().build();
         let instructions = include_str!("instructions.md");
