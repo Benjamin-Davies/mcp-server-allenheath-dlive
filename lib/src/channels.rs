@@ -121,15 +121,13 @@ impl Channel {
 
 impl fmt::Debug for Channel {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Channel").field(&self.to_string()).finish()
+        fmt::Display::fmt(self, f)
     }
 }
 
 impl fmt::Debug for ChannelName {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("ChannelName")
-            .field(&self.to_string())
-            .finish()
+        write!(f, "\"{self}\"")
     }
 }
 

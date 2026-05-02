@@ -30,7 +30,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub struct DLiveClient<S = TcpStream> {
-    stream: Pin<Box<Framed<S, DLiveCodec>>>,
+    pub stream: Pin<Box<Framed<S, DLiveCodec>>>,
 }
 
 impl DLiveClient<TcpStream> {

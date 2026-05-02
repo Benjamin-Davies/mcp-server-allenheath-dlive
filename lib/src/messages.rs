@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt};
 
 use crate::channels::{Channel, ChannelName};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Level(pub u8);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +63,12 @@ impl From<Level> for f32 {
 impl From<f32> for Level {
     fn from(value: f32) -> Self {
         Self(db_to_dlive_value(value))
+    }
+}
+
+impl fmt::Debug for Level {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(self, f)
     }
 }
 
