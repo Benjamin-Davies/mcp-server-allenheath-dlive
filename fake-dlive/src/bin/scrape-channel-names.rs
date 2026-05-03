@@ -7,6 +7,8 @@ use allenheath_dlive::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt().init();
+
     let mut client = DLiveClient::new(Ipv4Addr::LOCALHOST.into()).await?;
 
     let channels = [

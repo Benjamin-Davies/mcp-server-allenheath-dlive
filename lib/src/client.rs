@@ -5,15 +5,16 @@ use std::{
     io,
     net::{IpAddr, SocketAddr},
     pin::Pin,
-    task,
     time::Duration,
 };
 
 use anyhow::Result;
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt, stream::SplitSink};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
+    sync::broadcast,
+    task::JoinHandle,
     time::timeout,
 };
 use tokio_util::codec::Framed;
@@ -29,7 +30,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub struct DLiveClient<S = TcpStream> {
-    pub stream: Pin<Box<Framed<S, DLiveCodec>>>,
+    tx: Pin<Box<SplitSink<Framed<S, DLiveCodec>, Message>>>,
+    _rx_task: JoinHandle<()>,
+    rx_queue: broadcast::Receiver<Message>,
 }
 
 impl DLiveClient<TcpStream> {
@@ -69,42 +72,70 @@ macro_rules! wait_until {
     };
 }
 
-impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
+impl<S: AsyncRead + AsyncWrite + Debug + Send + 'static> DLiveClient<S> {
     #[tracing::instrument]
     pub fn with_stream(stream: S) -> Self {
+        let (tx, rx) = Framed::new(stream, DLiveCodec::default()).split();
+
+        let (rx_queue_tx, rx_queue) = broadcast::channel(16);
+        let rx = Box::pin(rx);
+        let _rx_task = tokio::task::spawn(rx_loop(rx, rx_queue_tx));
+
         Self {
-            stream: Box::pin(Framed::new(stream, DLiveCodec::default())),
+            tx: Box::pin(tx),
+            _rx_task,
+            rx_queue,
         }
     }
 
-    fn drop_unread(&mut self) {
-        let mut cx = task::Context::from_waker(task::Waker::noop());
-        while let task::Poll::Ready(_) = self.stream.poll_next_unpin(&mut cx) {
-            // Drop all unread messages
-        }
+    pub async fn send(&mut self, message: Message) -> anyhow::Result<()> {
+        self.tx.send(message).await?;
+        Ok(())
+    }
+
+    pub async fn recv(&mut self) -> anyhow::Result<Message> {
+        let mut rx_queue = self.rx_queue.resubscribe();
+        let message = rx_queue.recv().await?;
+        Ok(message)
     }
 
     async fn wait_until<T>(&mut self, mut f: impl FnMut(Message) -> Option<T>) -> Result<T> {
-        timeout(REQUEST_TIMEOUT, async {
-            while let Some(message) = self.stream.next().await.transpose()? {
-                if let Some(res) = f(message.clone()) {
+        let mut rx_queue = self.rx_queue.resubscribe();
+        timeout(REQUEST_TIMEOUT, async move {
+            loop {
+                let message = rx_queue.recv().await?;
+                if let Some(res) = f(message) {
                     return Ok(res);
                 }
                 tracing::info!("Unexpected message: {message:?}")
             }
-            anyhow::bail!("Unexpected end of stream");
         })
         .await?
     }
+}
 
+#[tracing::instrument(skip(rx, queue_tx))]
+async fn rx_loop<S: Stream<Item = anyhow::Result<Message>> + Debug + Send + Unpin + 'static>(
+    mut rx: S,
+    queue_tx: broadcast::Sender<Message>,
+) {
+    while let Some(message) = rx.next().await {
+        match message {
+            Ok(message) => {
+                queue_tx.send(message).unwrap();
+            }
+            Err(err) => {
+                tracing::error!("Error receiving message: {err}");
+            }
+        }
+    }
+}
+
+impl<S: AsyncRead + AsyncWrite + Debug + Send + 'static> DLiveClient<S> {
     #[tracing::instrument]
     pub async fn channel_names(&mut self, channels: &[Channel]) -> Result<Vec<ChannelName>> {
-        self.drop_unread();
-
         for &channel in channels {
-            self.stream
-                .send(Message::GetChannelName { channel })
-                .await?;
+            self.send(Message::GetChannelName { channel }).await?;
         }
 
         let mut names = Vec::new();
@@ -117,11 +148,7 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
 
     #[tracing::instrument]
     pub async fn send_level(&mut self, channel: Channel, send: Channel) -> Result<Level> {
-        self.drop_unread();
-
-        self.stream
-            .send(Message::GetSendLevel { channel, send })
-            .await?;
+        self.send(Message::GetSendLevel { channel, send }).await?;
 
         let level = wait_until!(self, Message::SendLevel { channel: c, send: s, level } if c == channel && s == send => level);
 
@@ -135,22 +162,19 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
         send: Channel,
         level: Level,
     ) -> Result<()> {
-        self.stream
-            .send(Message::SendLevel {
-                channel,
-                send,
-                level,
-            })
-            .await?;
+        self.send(Message::SendLevel {
+            channel,
+            send,
+            level,
+        })
+        .await?;
 
         Ok(())
     }
 
     #[tracing::instrument]
     pub async fn fader_level(&mut self, channel: Channel) -> Result<Level> {
-        self.drop_unread();
-
-        self.stream.send(Message::GetFaderLevel { channel }).await?;
+        self.send(Message::GetFaderLevel { channel }).await?;
 
         let level =
             wait_until!(self, Message::FaderLevel { channel: c, level } if c == channel => level);
@@ -160,9 +184,7 @@ impl<S: AsyncRead + AsyncWrite + Debug> DLiveClient<S> {
 
     #[tracing::instrument]
     pub async fn set_fader_level(&mut self, channel: Channel, level: Level) -> Result<()> {
-        self.stream
-            .send(Message::FaderLevel { channel, level })
-            .await?;
+        self.send(Message::FaderLevel { channel, level }).await?;
 
         Ok(())
     }

@@ -157,11 +157,11 @@ impl Decoder for DLiveCodec {
                             let level = Level(u8::from(*value));
                             return Ok(Some(Message::FaderLevel { channel, level }));
                         }
-                        _ => anyhow::bail!("Unknown control parameter {}", u8::from(func.0)),
+                        _ => tracing::warn!("Unknown control parameter {}", u8::from(func.0)),
                     },
-                    _ => anyhow::bail!("Unknown control function {}", u8::from(func.0)),
+                    _ => tracing::warn!("Unknown control function {}", u8::from(func.0)),
                 },
-                _ => anyhow::bail!("Unknown MIDI message {midi_msg:?}"),
+                _ => tracing::warn!("Unknown MIDI message {midi_msg:?}"),
             }
         }
         Ok(None)
