@@ -1,6 +1,13 @@
 //! https://www.allen-heath.com/content/uploads/2024/06/dLive-MIDI-Over-TCP-Protocol-V2.0.pdf
 
-use std::{fmt::Debug, io, net::SocketAddr, pin::Pin, task, time::Duration};
+use std::{
+    fmt::Debug,
+    io,
+    net::{IpAddr, SocketAddr},
+    pin::Pin,
+    task,
+    time::Duration,
+};
 
 use anyhow::Result;
 use futures::{SinkExt, StreamExt};
@@ -36,10 +43,27 @@ pub struct DLiveClient<S = TcpStream> {
 impl DLiveClient<TcpStream> {
     /// Connects to the dLive without TLS.
     #[tracing::instrument]
-    pub async fn new(addr: SocketAddr) -> io::Result<Self> {
-        let stream = TcpStream::connect(addr).await?;
+    pub async fn new(ip_addr: IpAddr) -> anyhow::Result<Self> {
+        for port in [
+            DLIVE_MIXRACK_TCP_PORT,
+            DLIVE_SURFACE_TCP_PORT,
+            DLIVE_FAKE_TCP_PORT,
+        ] {
+            let addr = SocketAddr::new(ip_addr, port);
+            match TcpStream::connect(addr).await {
+                Ok(stream) => return Ok(Self::with_stream(stream)),
+                Err(err) if err.kind() == io::ErrorKind::ConnectionRefused => {
+                    tracing::warn!("No dLive at {addr}");
+                    continue;
+                }
+                Err(err) => {
+                    tracing::error!("{err}");
+                    break;
+                }
+            }
+        }
 
-        Ok(Self::with_stream(stream))
+        anyhow::bail!("Failed to connect to dLive");
     }
 }
 
