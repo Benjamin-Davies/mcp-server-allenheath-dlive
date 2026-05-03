@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, net::Ipv4Addr};
 
 use allenheath_dlive::{
-    DLiveClient,
     channels::{Channel, ChannelType},
+    client::DLiveClient,
 };
 
 #[tokio::main]

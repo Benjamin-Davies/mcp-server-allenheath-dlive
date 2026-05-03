@@ -10,8 +10,8 @@ use rmcp::{
 use tokio::sync::Mutex;
 
 use allenheath_dlive::{
-    DLiveClient,
     channels::{Channel, ChannelName},
+    client::DLiveClient,
     messages::Level,
 };
 

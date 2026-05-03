@@ -1,6 +1,6 @@
 use std::{env::args, net::IpAddr};
 
-use allenheath_dlive::DLiveClient;
+use allenheath_dlive::client::DLiveClient;
 use futures::StreamExt;
 
 #[tokio::main]
