@@ -107,6 +107,7 @@ async fn handle_connection(stream: TcpStream, state: Arc<Mutex<State>>) -> anyho
                 let mut state = state.lock().await;
                 state.fader_levels.insert(channel, level);
             }
+            msg => unimplemented!("{msg:?}"),
         }
     }
 

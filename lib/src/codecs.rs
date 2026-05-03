@@ -2,7 +2,7 @@ use anyhow::Context;
 use bytes::{Buf, BufMut, BytesMut};
 use midi_stream::{
     MidiCodec, RunningStatus,
-    wmidi::{Channel as MidiChannel, ControlFunction, MidiMessage, U7},
+    wmidi::{Channel as MidiChannel, ControlFunction, MidiMessage, Note, U7},
 };
 use tokio_util::codec::{Decoder, Encoder};
 
@@ -48,36 +48,50 @@ impl Encoder<Message> for DLiveCodec {
 
     fn encode(&mut self, item: Message, dst: &mut BytesMut) -> anyhow::Result<()> {
         match item {
-            Message::GetChannelName { channel } => self.encode_sysex(
+            Message::MuteStatus { channel, mute } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let midi_channel = MidiChannel::from_index(midi_channel)?;
+                let note = Note::from_u8_lossy(note);
+                let velocity = if mute {
+                    U7::from_u8_lossy(0x7F)
+                } else {
+                    U7::from_u8_lossy(0x3F)
+                };
+                self.inner
+                    .encode(MidiMessage::NoteOn(midi_channel, note, velocity), dst)?;
+                self.inner
+                    .encode(MidiMessage::NoteOn(midi_channel, note, U7::MIN), dst)?;
+                Ok(())
+            }
+            Message::GetMuteStatus { channel } => self.encode_sysex(
                 |buf| {
                     let (midi_channel, note) = channel.to_midi()?;
-                    buf.put_slice(&[midi_channel, 0x01, note]);
+                    buf.put_slice(&[midi_channel, 0x05, 0x09, note]);
                     Ok(())
                 },
                 dst,
             ),
-            Message::ChannelName { channel, name } => self.encode_sysex(
+            Message::FaderLevel { channel, level } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let midi_channel = MidiChannel::from_index(midi_channel)?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_CHANNEL, note.try_into()?),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_PARAM, PARAM_FADER_LEVEL),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_VALUE, level.0.try_into()?),
+                    dst,
+                )?;
+                Ok(())
+            }
+            Message::GetFaderLevel { channel } => self.encode_sysex(
                 |buf| {
                     let (midi_channel, note) = channel.to_midi()?;
-                    buf.put_slice(&[midi_channel, 0x02, note]);
-                    buf.put_slice(&name.0);
-                    Ok(())
-                },
-                dst,
-            ),
-            Message::GetSendLevel { channel, send } => self.encode_sysex(
-                |buf| {
-                    let (midi_channel, note) = channel.to_midi()?;
-                    let (send_midi_channel, send_note) = send.to_midi()?;
-                    buf.put_slice(&[
-                        midi_channel,
-                        0x05,
-                        0x0F,
-                        0x0D,
-                        note,
-                        send_midi_channel,
-                        send_note,
-                    ]);
+                    buf.put_slice(&[midi_channel, 0x05, 0x0B, 0x17, note]);
                     Ok(())
                 },
                 dst,
@@ -102,31 +116,40 @@ impl Encoder<Message> for DLiveCodec {
                 },
                 dst,
             ),
-            Message::GetFaderLevel { channel } => self.encode_sysex(
+            Message::GetSendLevel { channel, send } => self.encode_sysex(
                 |buf| {
                     let (midi_channel, note) = channel.to_midi()?;
-                    buf.put_slice(&[midi_channel, 0x05, 0x0B, 0x17, note]);
+                    let (send_midi_channel, send_note) = send.to_midi()?;
+                    buf.put_slice(&[
+                        midi_channel,
+                        0x05,
+                        0x0F,
+                        0x0D,
+                        note,
+                        send_midi_channel,
+                        send_note,
+                    ]);
                     Ok(())
                 },
                 dst,
             ),
-            Message::FaderLevel { channel, level } => {
-                let (midi_channel, note) = channel.to_midi()?;
-                let midi_channel = MidiChannel::from_index(midi_channel)?;
-                self.inner.encode(
-                    MidiMessage::ControlChange(midi_channel, CONTROL_CHANNEL, note.try_into()?),
-                    dst,
-                )?;
-                self.inner.encode(
-                    MidiMessage::ControlChange(midi_channel, CONTROL_PARAM, PARAM_FADER_LEVEL),
-                    dst,
-                )?;
-                self.inner.encode(
-                    MidiMessage::ControlChange(midi_channel, CONTROL_VALUE, level.0.try_into()?),
-                    dst,
-                )?;
-                Ok(())
-            }
+            Message::ChannelName { channel, name } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x02, note]);
+                    buf.put_slice(&name.0);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::GetChannelName { channel } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x01, note]);
+                    Ok(())
+                },
+                dst,
+            ),
         }
     }
 }
@@ -138,6 +161,17 @@ impl Decoder for DLiveCodec {
     fn decode(&mut self, src: &mut BytesMut) -> anyhow::Result<Option<Message>> {
         while let Some(midi_msg) = self.inner.decode(src)? {
             match &midi_msg {
+                MidiMessage::NoteOn(midi_channel, note, velocity) => {
+                    let channel = Channel::from_midi(midi_channel.index(), u8::from(*note))?;
+                    let mute = match u8::from(*velocity) {
+                        0x00 => continue,
+                        0x01..=0x3F => false,
+                        0x40..=0x7F => true,
+                        _ => unreachable!(),
+                    };
+                    return Ok(Some(Message::MuteStatus { channel, mute }));
+                }
+                MidiMessage::NoteOff(_, _, _) => continue,
                 MidiMessage::OwnedSysEx(data) => {
                     let bytes = U7::data_to_bytes(data);
                     let msg = decode_sysex_message(bytes).context("Invalid SysEx message")?;
@@ -196,25 +230,37 @@ fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
         }
         0x05 => {
             anyhow::ensure!(raw.len() >= 2);
-            match raw.get_u16() {
-                0x0B_17 => {
-                    anyhow::ensure!(raw.len() == 1);
+            match raw.get_u8() {
+                0x09 => {
                     let note = raw.get_u8();
                     let channel = Channel::from_midi(midi_channel, note)?;
 
-                    Message::GetFaderLevel { channel }
+                    Message::GetMuteStatus { channel }
                 }
-                0x0F_0D => {
-                    anyhow::ensure!(raw.len() == 3);
-                    let note = raw.get_u8();
-                    let channel = Channel::from_midi(midi_channel, note)?;
+                0x0B => match raw.get_u8() {
+                    0x17 => {
+                        anyhow::ensure!(raw.len() == 1);
+                        let note = raw.get_u8();
+                        let channel = Channel::from_midi(midi_channel, note)?;
 
-                    let send_midi_channel = raw.get_u8();
-                    let send_note = raw.get_u8();
-                    let send = Channel::from_midi(send_midi_channel, send_note)?;
+                        Message::GetFaderLevel { channel }
+                    }
+                    _ => todo!(),
+                },
+                0x0F => match raw.get_u8() {
+                    0x0D => {
+                        anyhow::ensure!(raw.len() == 3);
+                        let note = raw.get_u8();
+                        let channel = Channel::from_midi(midi_channel, note)?;
 
-                    Message::GetSendLevel { channel, send }
-                }
+                        let send_midi_channel = raw.get_u8();
+                        let send_note = raw.get_u8();
+                        let send = Channel::from_midi(send_midi_channel, send_note)?;
+
+                        Message::GetSendLevel { channel, send }
+                    }
+                    _ => todo!(),
+                },
                 _ => todo!(),
             }
         }

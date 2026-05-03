@@ -7,28 +7,35 @@ pub struct Level(pub u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Message {
-    GetChannelName {
+    MuteStatus {
+        channel: Channel,
+        mute: bool,
+    },
+    GetMuteStatus {
         channel: Channel,
     },
-    ChannelName {
+    FaderLevel {
         channel: Channel,
-        name: ChannelName,
+        level: Level,
     },
-    GetSendLevel {
+    GetFaderLevel {
         channel: Channel,
-        send: Channel,
     },
     SendLevel {
         channel: Channel,
         send: Channel,
         level: Level,
     },
-    GetFaderLevel {
+    GetSendLevel {
         channel: Channel,
+        send: Channel,
     },
-    FaderLevel {
+    ChannelName {
         channel: Channel,
-        level: Level,
+        name: ChannelName,
+    },
+    GetChannelName {
+        channel: Channel,
     },
 }
 
