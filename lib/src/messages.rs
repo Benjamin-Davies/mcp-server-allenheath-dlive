@@ -5,7 +5,7 @@ use crate::channels::{Channel, ChannelName};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Level(pub u8);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Message {
     GetChannelName {
         channel: Channel,
@@ -144,7 +144,7 @@ impl schemars::JsonSchema for Level {
 
 #[cfg(test)]
 mod tests {
-    use crate::messages::{db_to_dlive_value, dlive_value_to_db};
+    use crate::messages::{Message, db_to_dlive_value, dlive_value_to_db};
 
     #[test]
     fn test_dlive_value_to_db() {
@@ -178,5 +178,17 @@ mod tests {
         assert_eq!(db_to_dlive_value(-40.0), 0x1B);
         assert_eq!(db_to_dlive_value(-45.0), 0x11);
         assert_eq!(db_to_dlive_value(f32::NEG_INFINITY), 0x00);
+    }
+
+    #[test]
+    fn test_messages_are_small() {
+        assert!(size_of::<Message>() < 16);
+    }
+
+    #[test]
+    fn test_messages_are_copy() {
+        fn assert_copy<T: Copy>() {}
+
+        assert_copy::<Message>();
     }
 }
