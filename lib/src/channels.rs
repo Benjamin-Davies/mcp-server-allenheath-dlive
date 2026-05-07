@@ -54,6 +54,21 @@ const MIDI_MAPPINGS: &[(ChannelType, u8, RangeInclusive<u8>)] = &[
     ),
 ];
 
+const CHANNEL_COLOURS: [ChannelColour; 8] = [
+    ChannelColour::Off,
+    ChannelColour::Red,
+    ChannelColour::Green,
+    ChannelColour::Yellow,
+    ChannelColour::Blue,
+    ChannelColour::Purple,
+    ChannelColour::LtBlue,
+    ChannelColour::White,
+];
+
+const CHANNEL_COLOUR_NAMES: [&str; 8] = [
+    "Off", "Red", "Green", "Yellow", "Blue", "Purple", "Lt Blue", "White",
+];
+
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Channel(pub ChannelType, pub u8);
 
@@ -79,6 +94,19 @@ pub enum ChannelType {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ChannelName(pub [u8; CHANNEL_NAME_LEN]);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum ChannelColour {
+    Off = 0x00,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Purple,
+    LtBlue,
+    White,
+}
 
 impl Channel {
     pub fn validate(self) -> anyhow::Result<()> {
@@ -116,6 +144,12 @@ impl Channel {
             .find(|&(_, n, ch_range)| n == &midi_channel && ch_range.contains(&note))
             .context("unknown channel type")?;
         Ok(Self(*ty, note - ch_range.start() + 1))
+    }
+}
+
+impl ChannelColour {
+    pub fn as_str(self) -> &'static str {
+        CHANNEL_COLOUR_NAMES[self as usize]
     }
 }
 
@@ -159,6 +193,12 @@ impl fmt::Display for ChannelName {
     }
 }
 
+impl fmt::Display for ChannelColour {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl FromStr for Channel {
     type Err = anyhow::Error;
 
@@ -197,6 +237,18 @@ impl FromStr for ChannelName {
     }
 }
 
+impl FromStr for ChannelColour {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let index = CHANNEL_COLOUR_NAMES
+            .iter()
+            .position(|&x| x == s)
+            .context("Unknown channel colour")?;
+        Ok(CHANNEL_COLOURS[index])
+    }
+}
+
 impl TryFrom<&[u8]> for ChannelName {
     type Error = anyhow::Error;
 
@@ -210,6 +262,16 @@ impl TryFrom<&[u8]> for ChannelName {
         let mut array = [0; CHANNEL_NAME_LEN];
         array[..value.len()].copy_from_slice(value);
         Ok(Self(array))
+    }
+}
+
+impl TryFrom<u8> for ChannelColour {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        let index = value as usize;
+        anyhow::ensure!(index < CHANNEL_COLOURS.len());
+        Ok(CHANNEL_COLOURS[index])
     }
 }
 
@@ -228,6 +290,15 @@ impl serde::Serialize for ChannelName {
         S: serde::Serializer,
     {
         self.to_string().serialize(serializer)
+    }
+}
+
+impl serde::Serialize for ChannelColour {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.as_str().serialize(serializer)
     }
 }
 

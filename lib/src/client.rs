@@ -77,7 +77,7 @@ impl<S: AsyncRead + AsyncWrite + Debug + Send + 'static> DLiveClient<S> {
     pub fn with_stream(stream: S) -> Self {
         let (tx, rx) = Framed::new(stream, DLiveCodec::default()).split();
 
-        let (rx_queue_tx, rx_queue) = broadcast::channel(16);
+        let (rx_queue_tx, rx_queue) = broadcast::channel(128);
         let rx = Box::pin(rx);
         let _rx_task = tokio::task::spawn(rx_loop(rx, rx_queue_tx));
 
@@ -93,7 +93,11 @@ impl<S: AsyncRead + AsyncWrite + Debug + Send + 'static> DLiveClient<S> {
         Ok(())
     }
 
-    pub async fn recv(&mut self) -> anyhow::Result<Message> {
+    pub fn incoming(&self) -> broadcast::Receiver<Message> {
+        self.rx_queue.resubscribe()
+    }
+
+    pub async fn recv(&self) -> anyhow::Result<Message> {
         let mut rx_queue = self.rx_queue.resubscribe();
         let message = rx_queue.recv().await?;
         Ok(message)
@@ -126,6 +130,9 @@ async fn rx_loop<S: Stream<Item = anyhow::Result<Message>> + Debug + Send + Unpi
             }
             Err(err) => {
                 tracing::error!("Error receiving message: {err}");
+                for source in err.chain() {
+                    tracing::error!("{source}");
+                }
             }
         }
     }

@@ -18,6 +18,8 @@ const CONTROL_PARAM: ControlFunction = ControlFunction::NON_REGISTERED_PARAMETER
 const CONTROL_VALUE: ControlFunction = ControlFunction::DATA_ENTRY_MSB;
 
 const PARAM_FADER_LEVEL: U7 = U7::from_u8_lossy(0x17);
+const PARAM_MAIN_MIX_ASSIGN: U7 = U7::from_u8_lossy(0x18);
+const PARAM_DCA_MG_ASSIGN: U7 = U7::from_u8_lossy(0x40);
 
 #[derive(Debug, Default)]
 pub struct DLiveCodec {
@@ -96,6 +98,36 @@ impl Encoder<Message> for DLiveCodec {
                 },
                 dst,
             ),
+            Message::MainMixAssignment { channel, assign } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let midi_channel = MidiChannel::from_index(midi_channel)?;
+                let velocity = if assign {
+                    U7::from_u8_lossy(0x7F)
+                } else {
+                    U7::from_u8_lossy(0x3F)
+                };
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_CHANNEL, note.try_into()?),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_PARAM, PARAM_MAIN_MIX_ASSIGN),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_VALUE, velocity),
+                    dst,
+                )?;
+                Ok(())
+            }
+            Message::GetMainMixAssignment { channel } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x05, 0x0B, 0x18, note]);
+                    Ok(())
+                },
+                dst,
+            ),
             Message::SendLevel {
                 channel,
                 send,
@@ -133,10 +165,101 @@ impl Encoder<Message> for DLiveCodec {
                 },
                 dst,
             ),
-            Message::ChannelName { channel, name } => self.encode_sysex(
+            Message::SendAssign {
+                channel,
+                send,
+                assign,
+            } => self.encode_sysex(
                 |buf| {
                     let (midi_channel, note) = channel.to_midi()?;
-                    buf.put_slice(&[midi_channel, 0x02, note]);
+                    let (send_midi_channel, send_note) = send.to_midi()?;
+                    buf.put_slice(&[
+                        midi_channel,
+                        0x0D,
+                        note,
+                        send_midi_channel,
+                        send_note,
+                        if assign { 0x7F } else { 0x4F },
+                    ]);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::GetSendAssign { channel, send } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    let (send_midi_channel, send_note) = send.to_midi()?;
+                    buf.put_slice(&[
+                        midi_channel,
+                        0x05,
+                        0x0F,
+                        0x0E,
+                        note,
+                        send_midi_channel,
+                        send_note,
+                    ]);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::DcaAssign {
+                channel,
+                dca,
+                assign,
+            } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let midi_channel = MidiChannel::from_index(midi_channel)?;
+                anyhow::ensure!((1..=24).contains(&dca));
+                let value = dca - 1 + if assign { 0x40 } else { 0x00 };
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_CHANNEL, note.try_into()?),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_PARAM, PARAM_DCA_MG_ASSIGN),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(
+                        midi_channel,
+                        CONTROL_VALUE,
+                        U7::from_u8_lossy(value),
+                    ),
+                    dst,
+                )?;
+                Ok(())
+            }
+            Message::MuteGroupAssign {
+                channel,
+                mute_group,
+                assign,
+            } => {
+                let (midi_channel, note) = channel.to_midi()?;
+                let midi_channel = MidiChannel::from_index(midi_channel)?;
+                anyhow::ensure!((1..=8).contains(&mute_group));
+                let value = mute_group - 1 + if assign { 0x58 } else { 0x18 };
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_CHANNEL, note.try_into()?),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(midi_channel, CONTROL_PARAM, PARAM_DCA_MG_ASSIGN),
+                    dst,
+                )?;
+                self.inner.encode(
+                    MidiMessage::ControlChange(
+                        midi_channel,
+                        CONTROL_VALUE,
+                        U7::from_u8_lossy(value),
+                    ),
+                    dst,
+                )?;
+                Ok(())
+            }
+            Message::SetChannelName { channel, name } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x03, note]);
                     buf.put_slice(&name.0);
                     Ok(())
                 },
@@ -146,6 +269,39 @@ impl Encoder<Message> for DLiveCodec {
                 |buf| {
                     let (midi_channel, note) = channel.to_midi()?;
                     buf.put_slice(&[midi_channel, 0x01, note]);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::ChannelName { channel, name } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x02, note]);
+                    buf.put_slice(&name.0);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::SetChannelColour { channel, colour } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x06, note, colour as u8]);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::GetChannelColour { channel } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x04, note]);
+                    Ok(())
+                },
+                dst,
+            ),
+            Message::ChannelColour { channel, colour } => self.encode_sysex(
+                |buf| {
+                    let (midi_channel, note) = channel.to_midi()?;
+                    buf.put_slice(&[midi_channel, 0x05, note, colour as u8]);
                     Ok(())
                 },
                 dst,
@@ -167,7 +323,7 @@ impl Decoder for DLiveCodec {
                         0x00 => continue,
                         0x01..=0x3F => false,
                         0x40..=0x7F => true,
-                        _ => unreachable!(),
+                        0x80..=0xFF => unreachable!(),
                     };
                     return Ok(Some(Message::MuteStatus { channel, mute }));
                 }
@@ -190,6 +346,48 @@ impl Decoder for DLiveCodec {
                             let channel = self.current_channel;
                             let level = Level(u8::from(*value));
                             return Ok(Some(Message::FaderLevel { channel, level }));
+                        }
+                        PARAM_MAIN_MIX_ASSIGN => {
+                            let channel = self.current_channel;
+                            let assign = u8::from(*value) >= 0x40;
+                            return Ok(Some(Message::MainMixAssignment { channel, assign }));
+                        }
+                        PARAM_DCA_MG_ASSIGN => {
+                            let channel = self.current_channel;
+                            let raw = u8::from(*value);
+                            match raw {
+                                0x00..=0x17 => {
+                                    return Ok(Some(Message::DcaAssign {
+                                        channel,
+                                        dca: raw - 0x00 + 1,
+                                        assign: false,
+                                    }));
+                                }
+                                0x18..=0x1F => {
+                                    return Ok(Some(Message::MuteGroupAssign {
+                                        channel,
+                                        mute_group: raw - 0x18 + 1,
+                                        assign: true,
+                                    }));
+                                }
+                                0x20..=0x3F => continue,
+                                0x40..=0x57 => {
+                                    return Ok(Some(Message::DcaAssign {
+                                        channel,
+                                        dca: raw - 0x40 + 1,
+                                        assign: true,
+                                    }));
+                                }
+                                0x58..=0x5F => {
+                                    return Ok(Some(Message::MuteGroupAssign {
+                                        channel,
+                                        mute_group: raw - 0x58 + 1,
+                                        assign: true,
+                                    }));
+                                }
+                                0x60..=0x7F => continue,
+                                0x80..=0xFF => unreachable!(),
+                            }
                         }
                         _ => tracing::warn!("Unknown control parameter {}", u8::from(func.0)),
                     },
@@ -228,6 +426,37 @@ fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
 
             Message::ChannelName { channel, name }
         }
+        0x03 => {
+            anyhow::ensure!(raw.len() >= 1);
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+
+            let name = raw
+                .try_into()
+                .context("received a channel name longer than 8 bytes")?;
+            raw = &[];
+
+            Message::SetChannelName { channel, name }
+        }
+        0x04 => {
+            anyhow::ensure!(raw.len() == 1);
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+            Message::GetChannelColour { channel }
+        }
+        0x05 if raw.len() == 2 && raw[1] <= 0x07 => {
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+            let colour = raw.get_u8().try_into()?;
+            Message::ChannelColour { channel, colour }
+        }
+        0x06 => {
+            anyhow::ensure!(raw.len() == 2);
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+            let colour = raw.get_u8().try_into()?;
+            Message::SetChannelColour { channel, colour }
+        }
         0x05 => {
             anyhow::ensure!(raw.len() >= 2);
             match raw.get_u8() {
@@ -245,7 +474,17 @@ fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
 
                         Message::GetFaderLevel { channel }
                     }
-                    _ => todo!(),
+                    0x18 => {
+                        anyhow::ensure!(raw.len() == 1);
+                        let note = raw.get_u8();
+                        let channel = Channel::from_midi(midi_channel, note)?;
+
+                        Message::GetMainMixAssignment { channel }
+                    }
+                    b => {
+                        tracing::warn!("Unknown SysEx message: 05, 0B, {b:02X}");
+                        return Ok(None);
+                    }
                 },
                 0x0F => match raw.get_u8() {
                     0x0D => {
@@ -259,9 +498,26 @@ fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
 
                         Message::GetSendLevel { channel, send }
                     }
-                    _ => todo!(),
+                    0x0E => {
+                        anyhow::ensure!(raw.len() == 3);
+                        let note = raw.get_u8();
+                        let channel = Channel::from_midi(midi_channel, note)?;
+
+                        let send_midi_channel = raw.get_u8();
+                        let send_note = raw.get_u8();
+                        let send = Channel::from_midi(send_midi_channel, send_note)?;
+
+                        Message::GetSendAssign { channel, send }
+                    }
+                    b => {
+                        tracing::warn!("Unknown SysEx message: 05, 0F, {b:02X}");
+                        return Ok(None);
+                    }
                 },
-                _ => todo!(),
+                b => {
+                    tracing::warn!("Unknown SysEx message: 05, {b:02X}");
+                    return Ok(None);
+                }
             }
         }
         0x0D => {
@@ -283,7 +539,29 @@ fn decode_sysex_message(raw: &[u8]) -> anyhow::Result<Option<Message>> {
                 level,
             }
         }
-        _ => anyhow::bail!("Unknown SysEx message kind: 0x{kind:02X}"),
+        0x0E => {
+            anyhow::ensure!(raw.len() == 4);
+
+            let note = raw.get_u8();
+            let channel = Channel::from_midi(midi_channel, note)?;
+
+            let send_midi_channel = raw.get_u8();
+            let send_note = raw.get_u8();
+            let send = Channel::from_midi(send_midi_channel, send_note)?;
+
+            let raw_assign = raw.get_u8();
+            let assign = raw_assign >= 0x40;
+
+            Message::SendAssign {
+                channel,
+                send,
+                assign,
+            }
+        }
+        _ => {
+            tracing::warn!("Unknown SysEx message kind: 0x{kind:02X}");
+            return Ok(None);
+        }
     };
 
     anyhow::ensure!(raw.is_empty());

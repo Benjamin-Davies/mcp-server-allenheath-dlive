@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt};
 
-use crate::channels::{Channel, ChannelName};
+use crate::channels::{Channel, ChannelColour, ChannelName};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Level(pub u8);
@@ -21,6 +21,13 @@ pub enum Message {
     GetFaderLevel {
         channel: Channel,
     },
+    MainMixAssignment {
+        channel: Channel,
+        assign: bool,
+    },
+    GetMainMixAssignment {
+        channel: Channel,
+    },
     SendLevel {
         channel: Channel,
         send: Channel,
@@ -30,12 +37,46 @@ pub enum Message {
         channel: Channel,
         send: Channel,
     },
-    ChannelName {
+    SendAssign {
+        channel: Channel,
+        send: Channel,
+        assign: bool,
+    },
+    GetSendAssign {
+        channel: Channel,
+        send: Channel,
+    },
+    DcaAssign {
+        channel: Channel,
+        dca: u8,
+        assign: bool,
+    },
+    MuteGroupAssign {
+        channel: Channel,
+        mute_group: u8,
+        assign: bool,
+    },
+    SetChannelName {
         channel: Channel,
         name: ChannelName,
     },
     GetChannelName {
         channel: Channel,
+    },
+    ChannelName {
+        channel: Channel,
+        name: ChannelName,
+    },
+    SetChannelColour {
+        channel: Channel,
+        colour: ChannelColour,
+    },
+    GetChannelColour {
+        channel: Channel,
+    },
+    ChannelColour {
+        channel: Channel,
+        colour: ChannelColour,
     },
 }
 
