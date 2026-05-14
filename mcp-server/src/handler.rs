@@ -1,11 +1,16 @@
-use std::{fmt, ops::AddAssign, sync::Arc};
+use std::{collections::BTreeSet, fmt, future::Future, ops::AddAssign, sync::Arc};
 
 use anyhow::Context;
 use rmcp::{
-    ErrorData, Json, ServerHandler,
+    ErrorData, Json, Peer, RoleServer, ServerHandler,
     handler::server::wrapper::Parameters,
-    model::{Implementation, ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router,
+    model::{
+        Implementation, LoggingLevel, LoggingMessageNotificationParam, ServerCapabilities,
+        ServerInfo,
+    },
+    schemars,
+    service::NotificationContext,
+    tool, tool_handler, tool_router,
 };
 use tokio::sync::{Mutex, watch};
 
@@ -94,6 +99,7 @@ struct MixLevelResponse {
 #[derive(Debug)]
 pub struct DLiveHandler {
     state: Mutex<State>,
+    config_rx: watch::Receiver<ChannelConfig>,
 }
 
 #[derive(Debug)]
@@ -109,6 +115,7 @@ impl DLiveHandler {
     #[tracing::instrument]
     pub fn new(args: Arc<Args>, config_rx: watch::Receiver<ChannelConfig>) -> Self {
         Self {
+            config_rx: config_rx.clone(),
             state: Mutex::new(State {
                 args,
                 config_rx,
@@ -359,6 +366,89 @@ impl ServerHandler for DLiveHandler {
         ServerInfo::new(capabilities)
             .with_instructions(instructions)
             .with_server_info(server_info)
+    }
+
+    fn on_initialized(
+        &self,
+        context: NotificationContext<RoleServer>,
+    ) -> impl Future<Output = ()> + Send + '_ {
+        let config_rx = self.config_rx.clone();
+        let peer = context.peer;
+        async move {
+            tokio::spawn(notify_on_config_change(config_rx, peer));
+        }
+    }
+}
+
+async fn notify_on_config_change(
+    mut config_rx: watch::Receiver<ChannelConfig>,
+    peer: Peer<RoleServer>,
+) {
+    let initial = config_rx.borrow_and_update().clone();
+    let mut prev_inputs: BTreeSet<Channel> = initial.inputs.iter().collect();
+    let mut prev_mixes: BTreeSet<Channel> = initial.mixes.iter().collect();
+
+    loop {
+        if config_rx.changed().await.is_err() {
+            break;
+        }
+
+        let new_config = config_rx.borrow_and_update().clone();
+        let new_inputs: BTreeSet<Channel> = new_config.inputs.iter().collect();
+        let new_mixes: BTreeSet<Channel> = new_config.mixes.iter().collect();
+
+        let mut parts = Vec::new();
+
+        let added_inputs: Vec<_> = new_inputs
+            .difference(&prev_inputs)
+            .map(|c| c.to_string())
+            .collect();
+        let removed_inputs: Vec<_> = prev_inputs
+            .difference(&new_inputs)
+            .map(|c| c.to_string())
+            .collect();
+        let added_mixes: Vec<_> = new_mixes
+            .difference(&prev_mixes)
+            .map(|c| c.to_string())
+            .collect();
+        let removed_mixes: Vec<_> = prev_mixes
+            .difference(&new_mixes)
+            .map(|c| c.to_string())
+            .collect();
+
+        if !added_inputs.is_empty() {
+            parts.push(format!("inputs added: {}", added_inputs.join(", ")));
+        }
+        if !removed_inputs.is_empty() {
+            parts.push(format!("inputs removed: {}", removed_inputs.join(", ")));
+        }
+        if !added_mixes.is_empty() {
+            parts.push(format!("mixes added: {}", added_mixes.join(", ")));
+        }
+        if !removed_mixes.is_empty() {
+            parts.push(format!("mixes removed: {}", removed_mixes.join(", ")));
+        }
+
+        let message = if parts.is_empty() {
+            "Channel config reloaded (no changes to channel lists)".to_string()
+        } else {
+            format!("Channel config reloaded: {}", parts.join("; "))
+        };
+
+        if let Err(err) = peer
+            .notify_logging_message(LoggingMessageNotificationParam {
+                level: LoggingLevel::Info,
+                logger: Some("dlive-config".to_string()),
+                data: rmcp::serde_json::Value::String(message),
+            })
+            .await
+        {
+            tracing::warn!("Failed to send config-change notification to peer: {err}");
+            break;
+        }
+
+        prev_inputs = new_inputs;
+        prev_mixes = new_mixes;
     }
 }
 
