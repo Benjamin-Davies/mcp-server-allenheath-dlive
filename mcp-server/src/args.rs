@@ -24,6 +24,45 @@ pub struct Args {
     pub mixes: ChannelRangeList,
 }
 
+impl Args {
+    pub fn channel_config(&self) -> ChannelConfig {
+        ChannelConfig {
+            inputs: self.inputs.clone(),
+            mixes: self.mixes.clone(),
+        }
+    }
+}
+
+/// The subset of configuration that can be reloaded at runtime via SIGHUP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelConfig {
+    pub inputs: ChannelRangeList,
+    pub mixes: ChannelRangeList,
+}
+
+impl ChannelConfig {
+    /// Re-reads `DLIVE_INPUTS` and `DLIVE_MIXES` from the `.env` file without
+    /// mutating the process environment.
+    pub fn load() -> anyhow::Result<Self> {
+        let mut inputs: Option<ChannelRangeList> = None;
+        let mut mixes: Option<ChannelRangeList> = None;
+
+        for item in dotenvy::dotenv_iter().context("failed to open .env file")? {
+            let (key, value) = item.context("failed to parse .env entry")?;
+            match key.as_str() {
+                "DLIVE_INPUTS" => inputs = Some(value.parse().context("DLIVE_INPUTS")?),
+                "DLIVE_MIXES" => mixes = Some(value.parse().context("DLIVE_MIXES")?),
+                _ => {}
+            }
+        }
+
+        Ok(ChannelConfig {
+            inputs: inputs.context("DLIVE_INPUTS not set in .env")?,
+            mixes: mixes.context("DLIVE_MIXES not set in .env")?,
+        })
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ChannelRangeList {
     ranges: Vec<ChannelRange>,

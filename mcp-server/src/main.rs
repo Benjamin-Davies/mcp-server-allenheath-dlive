@@ -5,8 +5,12 @@ use clap::Parser;
 use rmcp::transport::{
     StreamableHttpService, streamable_http_server::session::local::LocalSessionManager,
 };
+use tokio::sync::watch;
 
-use crate::{args::Args, handler::DLiveHandler};
+use crate::{
+    args::{Args, ChannelConfig},
+    handler::DLiveHandler,
+};
 
 mod args;
 mod auth;
@@ -22,10 +26,15 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let args = Arc::new(args);
 
+    let initial_config = args.channel_config();
+    let (config_tx, config_rx) = watch::channel(initial_config);
+
+    tokio::spawn(sighup_task(config_tx));
+
     let session_manager = LocalSessionManager::default();
     let args_clone = args.clone();
     let mcp_service = StreamableHttpService::new(
-        move || Ok(DLiveHandler::new(args_clone.clone())),
+        move || Ok(DLiveHandler::new(args_clone.clone(), config_rx.clone())),
         Arc::new(session_manager),
         Default::default(),
     );
@@ -41,4 +50,30 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Listening on {:?}", listener.local_addr().unwrap());
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+async fn sighup_task(tx: watch::Sender<ChannelConfig>) {
+    use tokio::signal::unix::{SignalKind, signal};
+
+    let mut stream = match signal(SignalKind::hangup()) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::error!("Failed to register SIGHUP handler: {err}");
+            return;
+        }
+    };
+
+    loop {
+        stream.recv().await;
+        tracing::info!("SIGHUP received, reloading channel config from .env");
+        match ChannelConfig::load() {
+            Ok(config) => {
+                tx.send_replace(config);
+                tracing::info!("Channel config reloaded successfully");
+            }
+            Err(err) => {
+                tracing::error!("Failed to reload channel config: {err:#}");
+            }
+        }
+    }
 }

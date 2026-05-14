@@ -7,7 +7,7 @@ use rmcp::{
     model::{Implementation, ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 
 use allenheath_dlive::{
     channels::{Channel, ChannelName},
@@ -15,7 +15,7 @@ use allenheath_dlive::{
     messages::Level,
 };
 
-use crate::args::Args;
+use crate::args::{Args, ChannelConfig};
 
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 struct ListChannelsResponse {
@@ -99,6 +99,7 @@ pub struct DLiveHandler {
 #[derive(Debug)]
 struct State {
     args: Arc<Args>,
+    config_rx: watch::Receiver<ChannelConfig>,
     client: Option<DLiveClient>,
     inputs: Vec<ChannelDetails>,
     mixes: Vec<ChannelDetails>,
@@ -106,10 +107,11 @@ struct State {
 
 impl DLiveHandler {
     #[tracing::instrument]
-    pub fn new(args: Arc<Args>) -> Self {
+    pub fn new(args: Arc<Args>, config_rx: watch::Receiver<ChannelConfig>) -> Self {
         Self {
             state: Mutex::new(State {
                 args,
+                config_rx,
                 client: None,
                 inputs: Vec::new(),
                 mixes: Vec::new(),
@@ -119,6 +121,16 @@ impl DLiveHandler {
 }
 
 impl State {
+    /// Clears the cached channel lists if the config has changed since the last call.
+    fn invalidate_if_changed(&mut self) {
+        if self.config_rx.has_changed().unwrap_or(false) {
+            tracing::info!("Channel config changed, invalidating channel name caches");
+            self.config_rx.mark_unchanged();
+            self.inputs.clear();
+            self.mixes.clear();
+        }
+    }
+
     #[tracing::instrument(skip(self))]
     async fn client(&mut self) -> anyhow::Result<&mut DLiveClient> {
         if self.client.is_none() {
@@ -131,8 +143,9 @@ impl State {
 
     #[tracing::instrument(skip(self))]
     async fn list_inputs(&mut self) -> anyhow::Result<&[ChannelDetails]> {
+        self.invalidate_if_changed();
         if self.inputs.is_empty() {
-            let inputs = self.args.inputs.iter().collect::<Vec<_>>();
+            let inputs = self.config_rx.borrow().inputs.iter().collect::<Vec<_>>();
 
             let client = self.client().await?;
             let names = client.channel_names(&inputs).await?;
@@ -148,8 +161,9 @@ impl State {
 
     #[tracing::instrument(skip(self))]
     async fn list_mixes(&mut self) -> anyhow::Result<&[ChannelDetails]> {
+        self.invalidate_if_changed();
         if self.mixes.is_empty() {
-            let mixes = self.args.mixes.iter().collect::<Vec<_>>();
+            let mixes = self.config_rx.borrow().mixes.iter().collect::<Vec<_>>();
 
             let client = self.client().await?;
             let names = client.channel_names(&mixes).await?;
